@@ -345,6 +345,8 @@ void ConfigManipulation::toggle_print_fff_options(DynamicPrintConfig* config)
     toggle_field("min_feature_size", have_arachne);
     toggle_field("min_bead_width", have_arachne);
     toggle_field("thin_walls", !have_arachne);
+    bool have_small_area_infill_flow_compensation = config->opt_bool("small_area_infill_flow_compensation");
+    toggle_field("small_area_infill_flow_compensation_model", have_small_area_infill_flow_compensation);
 }
 
 void ConfigManipulation::toggle_print_sla_options(DynamicPrintConfig* config)

@@ -832,6 +832,7 @@ PRINT_CONFIG_CLASS_DEFINE(
     ((ConfigOptionString,              color_change_gcode))
     ((ConfigOptionString,              pause_print_gcode))
     ((ConfigOptionString,              template_custom_gcode))
+    ((ConfigOptionStrings,             small_area_infill_flow_compensation_model))
 )
 
 static inline std::string get_extrusion_axis(const GCodeConfig &cfg)
@@ -885,6 +886,7 @@ PRINT_CONFIG_CLASS_DERIVED_DEFINE(
     ((ConfigOptionInts,               full_fan_speed_layer))
     ((ConfigOptionFloat,              infill_acceleration))
     ((ConfigOptionBool,               infill_first))
+    ((ConfigOptionBool,               small_area_infill_flow_compensation))
     ((ConfigOptionInts,               max_fan_speed))
     ((ConfigOptionFloats,             max_layer_height))
     ((ConfigOptionInts,               min_fan_speed))

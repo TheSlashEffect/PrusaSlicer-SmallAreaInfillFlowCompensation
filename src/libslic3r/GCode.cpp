@@ -35,6 +35,7 @@
 #include "GCode/WipeTower.hpp"
 #include "GCode/WipeTowerIntegration.hpp"
 #include "GCode/Travels.hpp"
+#include "GCode/SmallAreaInfillFlowCompensator.hpp"
 #include "Point.hpp"
 #include "Polygon.hpp"
 #include "PrintConfig.hpp"
@@ -3283,6 +3284,13 @@ double cap_speed(
     return speed;
 }
 
+std::string create_small_area_flow_compensation_comment(double old_dE, double new_dE, double line_length) {
+    if (old_dE > 0 && old_dE != new_dE) {
+        return Slic3r::format(_u8L(" | Old Flow Value: %0.5f Length: %0.5f"), old_dE, line_length);
+    }
+    return "";
+}
+
 std::string GCodeGenerator::_extrude(
     const ExtrusionAttributes       &path_attr,
     const Geometry::ArcWelder::Path &path,
@@ -3478,6 +3486,11 @@ std::string GCodeGenerator::_extrude(
             cooling_marker_setspeed_comments += ";_EXTERNAL_PERIMETER";
     }
 
+    if (m_config.small_area_infill_flow_compensation.value &&
+        !m_config.small_area_infill_flow_compensation_model.empty()) {
+        m_small_area_infill_flow_compensator = std::make_unique<GCode::SmallAreaInfillFlowCompensator>(m_config);
+    }
+
     // F is mm per minute.
     gcode += m_writer.set_speed(F, "", cooling_marker_setspeed_comments);
     if (dynamic_speed_and_fan_speed.second >= 0)
@@ -3493,6 +3506,7 @@ std::string GCodeGenerator::_extrude(
     auto  it   = path.begin();
     auto  end  = path.end();
     for (++ it; it != end; ++ it) {
+        std::string line_comment = comment;
         Vec2d p_exact = this->point_to_gcode(it->point);
         Vec2d p = GCodeFormatter::quantize(p_exact);
         assert(p != prev);
@@ -3516,15 +3530,32 @@ std::string GCodeGenerator::_extrude(
             }
             if (radius == 0) {
                 // Extrude line segment.
-                if (const double line_length = (p - prev).norm(); line_length > 0)
-                    gcode += m_writer.extrude_to_xy(p, e_per_mm * line_length, comment);
+                if (const double line_length = (p - prev).norm(); line_length > 0) {
+                    double dE = e_per_mm * line_length;
+                    if (m_small_area_infill_flow_compensator) {
+                        double new_dE = m_small_area_infill_flow_compensator
+                                 ->modify_flow(line_length, dE, path_attr.role);
+                        if (m_config.gcode_comments) {
+                            line_comment += create_small_area_flow_compensation_comment(dE, new_dE, line_length);
+                        }
+                        dE = new_dE;
+                    }
+                    gcode += m_writer.extrude_to_xy(p, dE, line_comment);
+                }
             } else {
                 double angle = Geometry::ArcWelder::arc_angle(prev.cast<double>(), p.cast<double>(), double(radius));
                 assert(angle > 0);
                 const double line_length = angle * std::abs(radius);
-                const double dE          = e_per_mm * line_length;
+                double dE                = e_per_mm * line_length;
+                if (m_small_area_infill_flow_compensator) {
+                    double new_dE = m_small_area_infill_flow_compensator->modify_flow(line_length, dE, path_attr.role);
+                    if (m_config.gcode_comments) {
+                        line_comment += create_small_area_flow_compensation_comment(dE, new_dE, line_length);
+                    }
+                    dE = new_dE;
+                }
                 assert(dE > 0);
-                gcode += m_writer.extrude_to_xy_G2G3IJ(p, ij, it->ccw(), dE, comment);
+                gcode += m_writer.extrude_to_xy_G2G3IJ(p, ij, it->ccw(), dE, line_comment);
             }
             prev = p;
             prev_exact = p_exact;

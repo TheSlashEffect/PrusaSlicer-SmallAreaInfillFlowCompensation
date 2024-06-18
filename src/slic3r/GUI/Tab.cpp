@@ -1501,6 +1501,15 @@ void TabPrint::build()
         optgroup->append_single_option_line("bridge_angle");
         optgroup->append_single_option_line("only_retract_when_crossing_perimeters");
         optgroup->append_single_option_line("infill_first");
+        optgroup->append_single_option_line(
+            "small_area_infill_flow_compensation", "small-area-infill-flow-compensation"
+        );
+        Option model_option = optgroup->get_option("small_area_infill_flow_compensation_model");
+        model_option.opt.full_width = false;
+        model_option.opt.width = 15;
+        model_option.opt.is_code = true;
+        model_option.opt.height = 15;
+        optgroup->append_single_option_line(model_option, "small-area-infill-flow-compensation");
 
     page = add_options_page(L("Skirt and brim"), "skirt+brim");
         category_path = "skirt-and-brim_133969#";

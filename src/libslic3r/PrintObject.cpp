@@ -719,6 +719,9 @@ bool PrintObject::invalidate_state_by_config_options(
             || opt_key == "top_one_perimeter_type"
             || opt_key == "only_one_perimeter_first_layer") {
             steps.emplace_back(posPerimeters);
+        } else if (opt_key == "small_area_infill_flow_compensation"
+            || opt_key == "small_area_infill_flow_compensation_model") {
+            steps.emplace_back(posSlice);
         } else if (
                opt_key == "gap_fill_enabled"
             || opt_key == "gap_fill_speed") {

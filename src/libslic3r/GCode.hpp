@@ -40,6 +40,7 @@
 #include "GCode/GCodeProcessor.hpp"
 #include "GCode/ThumbnailData.hpp"
 #include "GCode/Travels.hpp"
+#include "GCode/SmallAreaInfillFlowCompensator.hpp"
 #include "EdgeGrid.hpp"
 #include "tcbspan/span.hpp"
 
@@ -444,6 +445,7 @@ private:
     std::unique_ptr<GCodeFindReplace>   m_find_replace;
     std::unique_ptr<PressureEqualizer>  m_pressure_equalizer;
     std::unique_ptr<GCode::WipeTowerIntegration> m_wipe_tower;
+    std::unique_ptr<GCode::SmallAreaInfillFlowCompensator> m_small_area_infill_flow_compensator;
 
     // Heights (print_z) at which the skirt has already been extruded.
     std::vector<coordf_t>               m_skirt_done;
