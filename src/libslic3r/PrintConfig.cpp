@@ -3307,7 +3307,7 @@ void PrintConfigDef::init_fff_params()
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionBool(true));
 
-    def = this->add("thin_walls", coBool);  
+    def = this->add("thin_walls", coBool);
     def->label = L("Detect thin walls");
     def->category = L("Layers and Perimeters");
     def->tooltip = L("Detect single-width walls (parts where two extrusions don't fit and we need "
