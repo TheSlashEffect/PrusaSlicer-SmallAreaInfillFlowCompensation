@@ -2715,27 +2715,183 @@ void PrintConfigDef::init_fff_params()
     def->set_default_value(new ConfigOptionInt(0));
 
     def = this->add("small_area_infill_flow_compensation", coBool);
-    def->label = L("Small area flow compensation (beta)");
+    def->label = L("Enable small area flow compensation");
     def->category = L("Infill");
     def->tooltip = L("Enable flow compensation for small infill areas");
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionBool(false));
 
-    def = this->add("small_area_infill_flow_compensation_model", coStrings);
-    def->label = L("Flow Compensation Model");
-    def->tooltip = L("Flow Compensation Model, used to adjust the flow for small infill "
-                     "areas. The model is expressed as a comma separated pair of values for "
-                     "extrusion length and flow correction factors, one per line, in the "
-                     "following format: \"1.234,5.678\"");
+    def = this->add("small_area_infill_flow_compensation_model_point_1_length", coFloat);
+    def->label = L("Extrusion length");
+    def->category = L("Infill");
+    def->sidetext = L("mm");
     def->mode = comExpert;
-    def->gui_flags = "serialized";
-    def->multiline = true;
-    def->full_width = true;
-    def->height = 15;
-    def->set_default_value(new ConfigOptionStrings{
-        "0,0", "\n0.2,0.4444", "\n0.4,0.6145", "\n0.6,0.7059", "\n0.8,0.7619", "\n1.5,0.8571",
-        "\n2,0.8889", "\n3,0.9231", "\n5,0.9520", "\n10,1"
-    });
+    def->min = 0.0;
+    def->max = 50.0;
+    def->set_default_value(new ConfigOptionFloat(0.));
+
+    def = this->add("small_area_infill_flow_compensation_model_point_2_length", coFloat);
+    def->label = L("Extrusion length");
+    def->category = L("Infill");
+    def->sidetext = L("mm");
+    def->mode = comExpert;
+    def->min = 0.0;
+    def->max = 50.0;
+    def->set_default_value(new ConfigOptionFloat(0.2));
+
+    def = this->add("small_area_infill_flow_compensation_model_point_3_length", coFloat);
+    def->label = L("Extrusion length");
+    def->category = L("Infill");
+    def->sidetext = L("mm");
+    def->mode = comExpert;
+    def->min = 0.0;
+    def->max = 50.0;
+    def->set_default_value(new ConfigOptionFloat(0.4));
+
+    def = this->add("small_area_infill_flow_compensation_model_point_4_length", coFloat);
+    def->label = L("Extrusion length");
+    def->category = L("Infill");
+    def->sidetext = L("mm");
+    def->mode = comExpert;
+    def->min = 0.0;
+    def->max = 50.0;
+    def->set_default_value(new ConfigOptionFloat(0.6));
+
+    def = this->add("small_area_infill_flow_compensation_model_point_5_length", coFloat);
+    def->label = L("Extrusion length");
+    def->category = L("Infill");
+    def->sidetext = L("mm");
+    def->mode = comExpert;
+    def->min = 0.0;
+    def->max = 50.0;
+    def->set_default_value(new ConfigOptionFloat(0.8));
+
+    def = this->add("small_area_infill_flow_compensation_model_point_6_length", coFloat);
+    def->label = L("Extrusion length");
+    def->category = L("Infill");
+    def->sidetext = L("mm");
+    def->mode = comExpert;
+    def->min = 0.0;
+    def->max = 50.0;
+    def->set_default_value(new ConfigOptionFloat(1.5));
+
+    def = this->add("small_area_infill_flow_compensation_model_point_7_length", coFloat);
+    def->label = L("Extrusion length");
+    def->category = L("Infill");
+    def->sidetext = L("mm");
+    def->mode = comExpert;
+    def->min = 0.0;
+    def->max = 50.0;
+    def->set_default_value(new ConfigOptionFloat(2));
+
+    def = this->add("small_area_infill_flow_compensation_model_point_8_length", coFloat);
+    def->label = L("Extrusion length");
+    def->category = L("Infill");
+    def->sidetext = L("mm");
+    def->mode = comExpert;
+    def->min = 0.0;
+    def->max = 50.0;
+    def->set_default_value(new ConfigOptionFloat(3));
+
+    def = this->add("small_area_infill_flow_compensation_model_point_9_length", coFloat);
+    def->label = L("Extrusion length");
+    def->category = L("Infill");
+    def->sidetext = L("mm");
+    def->mode = comExpert;
+    def->min = 0.0;
+    def->max = 50.0;
+    def->set_default_value(new ConfigOptionFloat(5));
+
+    def = this->add("small_area_infill_flow_compensation_model_point_10_length", coFloat);
+    def->label = L("Extrusion length");
+    def->category = L("Infill");
+    def->sidetext = L("mm");
+    def->mode = comExpert;
+    def->min = 0.0;
+    def->max = 50.0;
+    def->set_default_value(new ConfigOptionFloat(10));
+
+    def = this->add("small_area_infill_flow_compensation_model_point_1_factor", coFloat);
+    def->label = L("Compensation Factor");
+    def->category = L("Infill");
+    def->mode = comExpert;
+    def->min = 0.0;
+    def->max = 1.0;
+    def->set_default_value(new ConfigOptionFloat(0.));
+
+    def = this->add("small_area_infill_flow_compensation_model_point_2_factor", coFloat);
+    def->label = L("Compensation Factor");
+    def->category = L("Infill");
+    def->mode = comExpert;
+    def->min = 0.0;
+    def->max = 1.0;
+    def->set_default_value(new ConfigOptionFloat(0.4444));
+
+    def = this->add("small_area_infill_flow_compensation_model_point_3_factor", coFloat);
+    def->label = L("Compensation Factor");
+    def->category = L("Infill");
+    def->mode = comExpert;
+    def->min = 0.0;
+    def->max = 1.0;
+    def->set_default_value(new ConfigOptionFloat(0.6145));
+
+    def = this->add("small_area_infill_flow_compensation_model_point_4_factor", coFloat);
+    def->label = L("Compensation Factor");
+    def->category = L("Infill");
+    def->mode = comExpert;
+    def->min = 0.0;
+    def->max = 1.0;
+    def->set_default_value(new ConfigOptionFloat(0.7059));
+    
+
+    def = this->add("small_area_infill_flow_compensation_model_point_5_factor", coFloat);
+    def->label = L("Compensation Factor");
+    def->category = L("Infill");
+    def->mode = comExpert;
+    def->min = 0.0;
+    def->max = 1.0;
+    def->set_default_value(new ConfigOptionFloat(0.7619));
+
+    def = this->add("small_area_infill_flow_compensation_model_point_6_factor", coFloat);
+    def->label = L("Compensation Factor");
+    def->category = L("Infill");
+    def->mode = comExpert;
+    def->min = 0.0;
+    def->max = 1.0;
+    def->set_default_value(new ConfigOptionFloat(0.8571));
+
+    def = this->add("small_area_infill_flow_compensation_model_point_7_factor", coFloat);
+    def->label = L("Compensation Factor");
+    def->category = L("Infill");
+    def->mode = comExpert;
+    def->min = 0.0;
+    def->max = 1.0;
+    def->set_default_value(new ConfigOptionFloat(0.8889));
+
+    def = this->add("small_area_infill_flow_compensation_model_point_8_factor", coFloat);
+    def->label = L("Compensation Factor");
+    def->category = L("Infill");
+    def->mode = comExpert;
+    def->min = 0.0;
+    def->max = 1.0;
+    def->set_default_value(new ConfigOptionFloat(0.9231));
+
+    def = this->add("small_area_infill_flow_compensation_model_point_9_factor", coFloat);
+    def->label = L("Compensation Factor");
+    def->category = L("Infill");
+    def->mode = comExpert;
+    def->min = 0.0;
+    def->max = 1.0;
+    def->set_default_value(new ConfigOptionFloat(0.9520));
+    
+
+    def = this->add("small_area_infill_flow_compensation_model_point_10_factor", coFloat);
+    def->label = L("Compensation Factor");
+    def->category = L("Infill");
+    def->mode = comExpert;
+    def->min = 0.0;
+    def->max = 1.0;
+    def->set_default_value(new ConfigOptionFloat(1.0));
 
     def = this->add("solid_infill_extrusion_width", coFloatOrPercent);
     def->label = L("Solid infill");

@@ -25,6 +25,10 @@ private:
 
     double max_modified_length() { return extrusionLengths.back(); }
 
+    void read_config_parameters(const Slic3r::GCodeConfig &config);
+
+    void check_model_parameter_correctness();
+
 public:
     explicit SmallAreaInfillFlowCompensator(const Slic3r::GCodeConfig &config);
 

@@ -3486,8 +3486,7 @@ std::string GCodeGenerator::_extrude(
             cooling_marker_setspeed_comments += ";_EXTERNAL_PERIMETER";
     }
 
-    if (m_config.small_area_infill_flow_compensation.value &&
-        !m_config.small_area_infill_flow_compensation_model.empty()) {
+    if (m_config.small_area_infill_flow_compensation.value) {
         m_small_area_infill_flow_compensator = std::make_unique<GCode::SmallAreaInfillFlowCompensator>(m_config);
     }
 

@@ -483,7 +483,28 @@ static std::vector<std::string> s_Preset_print_options {
     "perimeter_generator", "wall_transition_length", "wall_transition_filter_deviation", "wall_transition_angle",
     "wall_distribution_count", "min_feature_size", "min_bead_width",
     "top_one_perimeter_type", "only_one_perimeter_first_layer",
-    "small_area_infill_flow_compensation", "small_area_infill_flow_compensation_model"
+    "small_area_infill_flow_compensation",
+    "small_area_infill_flow_compensation_model_point_1_length",
+    "small_area_infill_flow_compensation_model_point_2_length",
+    "small_area_infill_flow_compensation_model_point_3_length",
+    "small_area_infill_flow_compensation_model_point_4_length",
+    "small_area_infill_flow_compensation_model_point_5_length",
+    "small_area_infill_flow_compensation_model_point_6_length",
+    "small_area_infill_flow_compensation_model_point_7_length",
+    "small_area_infill_flow_compensation_model_point_8_length",
+    "small_area_infill_flow_compensation_model_point_9_length",
+    "small_area_infill_flow_compensation_model_point_10_length",
+    "small_area_infill_flow_compensation_model_point_1_factor",
+    "small_area_infill_flow_compensation_model_point_2_factor",
+    "small_area_infill_flow_compensation_model_point_3_factor",
+    "small_area_infill_flow_compensation_model_point_4_factor",
+    "small_area_infill_flow_compensation_model_point_5_factor",
+    "small_area_infill_flow_compensation_model_point_6_factor",
+    "small_area_infill_flow_compensation_model_point_7_factor",
+    "small_area_infill_flow_compensation_model_point_8_factor",
+    "small_area_infill_flow_compensation_model_point_9_factor",
+    "small_area_infill_flow_compensation_model_point_10_factor"
+,
 };
 
 static std::vector<std::string> s_Preset_filament_options {

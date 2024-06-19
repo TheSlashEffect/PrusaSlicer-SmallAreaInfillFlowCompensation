@@ -346,7 +346,26 @@ void ConfigManipulation::toggle_print_fff_options(DynamicPrintConfig* config)
     toggle_field("min_bead_width", have_arachne);
     toggle_field("thin_walls", !have_arachne);
     bool have_small_area_infill_flow_compensation = config->opt_bool("small_area_infill_flow_compensation");
-    toggle_field("small_area_infill_flow_compensation_model", have_small_area_infill_flow_compensation);
+    toggle_field("small_area_infill_flow_compensation_model_point_1_length", have_small_area_infill_flow_compensation);
+    toggle_field("small_area_infill_flow_compensation_model_point_2_length", have_small_area_infill_flow_compensation);
+    toggle_field("small_area_infill_flow_compensation_model_point_3_length", have_small_area_infill_flow_compensation);
+    toggle_field("small_area_infill_flow_compensation_model_point_4_length", have_small_area_infill_flow_compensation);
+    toggle_field("small_area_infill_flow_compensation_model_point_5_length", have_small_area_infill_flow_compensation);
+    toggle_field("small_area_infill_flow_compensation_model_point_6_length", have_small_area_infill_flow_compensation);
+    toggle_field("small_area_infill_flow_compensation_model_point_7_length", have_small_area_infill_flow_compensation);
+    toggle_field("small_area_infill_flow_compensation_model_point_8_length", have_small_area_infill_flow_compensation);
+    toggle_field("small_area_infill_flow_compensation_model_point_9_length", have_small_area_infill_flow_compensation);
+    toggle_field("small_area_infill_flow_compensation_model_point_10_length", have_small_area_infill_flow_compensation);
+    toggle_field("small_area_infill_flow_compensation_model_point_1_factor", have_small_area_infill_flow_compensation);
+    toggle_field("small_area_infill_flow_compensation_model_point_2_factor", have_small_area_infill_flow_compensation);
+    toggle_field("small_area_infill_flow_compensation_model_point_3_factor", have_small_area_infill_flow_compensation);
+    toggle_field("small_area_infill_flow_compensation_model_point_4_factor", have_small_area_infill_flow_compensation);
+    toggle_field("small_area_infill_flow_compensation_model_point_5_factor", have_small_area_infill_flow_compensation);
+    toggle_field("small_area_infill_flow_compensation_model_point_6_factor", have_small_area_infill_flow_compensation);
+    toggle_field("small_area_infill_flow_compensation_model_point_7_factor", have_small_area_infill_flow_compensation);
+    toggle_field("small_area_infill_flow_compensation_model_point_8_factor", have_small_area_infill_flow_compensation);
+    toggle_field("small_area_infill_flow_compensation_model_point_9_factor", have_small_area_infill_flow_compensation);
+    toggle_field("small_area_infill_flow_compensation_model_point_10_factor", have_small_area_infill_flow_compensation);
 }
 
 void ConfigManipulation::toggle_print_sla_options(DynamicPrintConfig* config)
