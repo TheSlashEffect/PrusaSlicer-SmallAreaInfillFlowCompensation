@@ -3,13 +3,15 @@
 %{
 #include <xsinit.h>
 #include "libslic3r/Layer.hpp"
+#include "libslic3r/ExPolygonCollection.hpp"
 %}
 
 %name{Slic3r::Layer::Region} class LayerRegion {
     // owned by Layer, no constructor/destructor
 
     Ref<Layer> layer();
-    Ref<PrintRegion> region();
+    Ref<PrintRegion> region()
+        %code%{ RETVAL = &THIS->region(); %};
 
     Ref<SurfaceCollection> slices()
         %code%{ RETVAL = &THIS->slices; %};
@@ -17,19 +19,13 @@
         %code%{ RETVAL = &THIS->thin_fills; %};
     Ref<SurfaceCollection> fill_surfaces()
         %code%{ RETVAL = &THIS->fill_surfaces; %};
-    Ref<SurfaceCollection> perimeter_surfaces()
-        %code%{ RETVAL = &THIS->perimeter_surfaces; %};
-    Polygons bridged()
-        %code%{ RETVAL = THIS->bridged; %};
-    Ref<PolylineCollection> unsupported_bridge_edges()
-        %code%{ RETVAL = &THIS->unsupported_bridge_edges; %};
     Ref<ExtrusionEntityCollection> perimeters()
         %code%{ RETVAL = &THIS->perimeters; %};
     Ref<ExtrusionEntityCollection> fills()
         %code%{ RETVAL = &THIS->fills; %};
     
-    Clone<Flow> flow(FlowRole role, bool bridge = false, double width = -1)
-        %code%{ RETVAL = THIS->flow(role, bridge, width); %};
+    Clone<Flow> flow(FlowRole role)
+        %code%{ RETVAL = THIS->flow(role); %};
     void prepare_fill_surfaces();
     void make_perimeters(SurfaceCollection* slices, SurfaceCollection* fill_surfaces)
         %code%{ THIS->make_perimeters(*slices, fill_surfaces); %};
@@ -63,8 +59,8 @@
     Ref<LayerRegion> get_region(int idx);
     Ref<LayerRegion> add_region(PrintRegion* print_region);
 
-    Ref<ExPolygonCollection> slices()
-        %code%{ RETVAL = &THIS->slices; %};
+    ExPolygonCollection* slices()
+        %code%{ RETVAL = new ExPolygonCollection(THIS->lslices); %};
 
     int ptr()
         %code%{ RETVAL = (int)(intptr_t)THIS; %};
@@ -73,7 +69,8 @@
         %code%{ RETVAL = dynamic_cast<SupportLayer*>(THIS); %};
     
     void make_slices();
-    void merge_slices();
+    void backup_untyped_slices();
+    void restore_untyped_slices();
     void make_perimeters();
     void make_fills();
 
@@ -112,8 +109,8 @@
     Ref<LayerRegion> get_region(int idx);
     Ref<LayerRegion> add_region(PrintRegion* print_region);
 
-    Ref<ExPolygonCollection> slices()
-        %code%{ RETVAL = &THIS->slices; %};
+    ExPolygonCollection* slices()
+        %code%{ RETVAL = new ExPolygonCollection(THIS->lslices); %};
     
     void export_region_slices_to_svg(const char *path);
     void export_region_fill_surfaces_to_svg(const char *path);

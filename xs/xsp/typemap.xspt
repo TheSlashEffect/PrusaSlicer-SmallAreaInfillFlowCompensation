@@ -97,12 +97,6 @@
 %typemap{PolylineCollection*};
 %typemap{Ref<PolylineCollection>}{simple};
 %typemap{Clone<PolylineCollection>}{simple};
-%typemap{MotionPlanner*};
-%typemap{Ref<MotionPlanner>}{simple};
-%typemap{Clone<MotionPlanner>}{simple};
-%typemap{GCodeSender*};
-%typemap{Ref<GCodeSender>}{simple};
-%typemap{Clone<GCodeSender>}{simple};
 %typemap{BridgeDetector*};
 %typemap{Ref<BridgeDetector>}{simple};
 %typemap{Clone<BridgeDetector>}{simple};
@@ -155,9 +149,9 @@
 %typemap{Ref<GCode>}{simple};
 %typemap{Clone<GCode>}{simple};
 
-%typemap{GCodePreviewData*};
-%typemap{Ref<GCodePreviewData>}{simple};
-%typemap{Clone<GCodePreviewData>}{simple};
+//%typemap{GCodePreviewData*};
+//%typemap{Ref<GCodePreviewData>}{simple};
+//%typemap{Clone<GCodePreviewData>}{simple};
 
 %typemap{Points};
 %typemap{Pointfs};
@@ -169,7 +163,6 @@
 %typemap{Surfaces};
 %typemap{Polygons*};
 %typemap{TriangleMesh*};
-%typemap{TriangleMeshPtrs};
 %typemap{Model*};
 %typemap{Ref<Model>}{simple};
 %typemap{Clone<Model>}{simple};
@@ -194,31 +187,13 @@
 %typemap{ModelInstancePtrs*};
 %typemap{Ref<ModelInstancePtrs>}{simple};
 %typemap{Clone<ModelInstancePtrs>}{simple};
-%typemap{AppConfig*};
-%typemap{Ref<AppConfig>}{simple};
-%typemap{GLShader*};
-%typemap{Ref<GLShader>}{simple};
-%typemap{GLVolume*};
-%typemap{Ref<GLVolume>}{simple};
-%typemap{GLVolumeCollection*};
-%typemap{Ref<GLVolumeCollection>}{simple};
-%typemap{Preset*};
-%typemap{Ref<Preset>}{simple};
-%typemap{PresetCollection*};
-%typemap{Ref<PresetCollection>}{simple};
-%typemap{PresetBundle*};
-%typemap{Ref<PresetBundle>}{simple};
-%typemap{PresetUpdater*};
-%typemap{Ref<PresetUpdater>}{simple};
 %typemap{PresetHints*};
 %typemap{Ref<PresetHints>}{simple};
-%typemap{TabIface*};
 
 %typemap{PrintRegionPtrs*};
 %typemap{PrintObjectPtrs*};
 %typemap{LayerPtrs*};
 %typemap{SupportLayerPtrs*};
-
 
 %typemap{Axis}{parsed}{
   %cpp_type{Axis};
@@ -268,6 +243,3 @@
     $CVar = (PrintObjectStep)SvUV($PerlVar);
   %};
 };
-%typemap{AppController*};
-%typemap{PrintController*};
-%typemap{PrintHost*};

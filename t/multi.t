@@ -25,7 +25,9 @@ use Slic3r::Test;
     $config->set('extruder_offset', [ [0,0], [20,0], [0,20], [20,20] ]);
     $config->set('temperature', [200, 180, 170, 160]);
     $config->set('first_layer_temperature', [206, 186, 166, 156]);
-    $config->set('toolchange_gcode', ';toolchange');  # test that it doesn't crash when this is supplied
+    $config->set('toolchange_gcode', 'T[next_extruder] ;toolchange');  # test that it doesn't crash when this is supplied
+    # Since July 2019, PrusaSlicer only emits automatic Tn command in case that the toolchange_gcode is empty
+    # The "T[next_extruder]" is therefore needed in this test.
     
     my $print = Slic3r::Test::init_print('20mm_cube', config => $config);
     
@@ -179,7 +181,7 @@ use Slic3r::Test;
     my $config = Slic3r::Config::new_from_defaults;
     $config->set('nozzle_diameter', [0.6,0.6,0.6,0.6]);
     $config->set('layer_height', 0.4);
-    $config->set('first_layer_height', '100%');
+    $config->set('first_layer_height', $config->layer_height);
     $config->set('skirts', 0);
     my $print = Slic3r::Test::init_print($model, config => $config);
     

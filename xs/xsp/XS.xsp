@@ -20,19 +20,13 @@ VERSION()
 SV*
 BUILD()
     CODE:
-        RETVAL = newSVpv(SLIC3R_BUILD, 0);
-    OUTPUT: RETVAL
-
-SV*
-DEBUG_OUT_PATH_PREFIX()
-    CODE:
-        RETVAL = newSVpv(SLIC3R_DEBUG_OUT_PATH_PREFIX, 0);
+        RETVAL = newSVpv(SLIC3R_BUILD_ID, 0);
     OUTPUT: RETVAL
 
 SV*
 FORK_NAME()
     CODE:
-        RETVAL = newSVpv(SLIC3R_FORK_NAME, 0);
+        RETVAL = newSVpv(SLIC3R_APP_NAME, 0);
     OUTPUT: RETVAL
 
 void
@@ -47,6 +41,11 @@ trace(level, message)
     char        *message;
     CODE:
         Slic3r::trace(level, message);
+
+void
+disable_multi_threading()
+    CODE:
+        Slic3r::disable_multi_threading();
 
 void
 set_var_dir(dir)

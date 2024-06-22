@@ -8,15 +8,12 @@ REGISTER_CLASS(ExPolygonCollection, "ExPolygon::Collection");
 REGISTER_CLASS(ExtrusionMultiPath, "ExtrusionMultiPath");
 REGISTER_CLASS(ExtrusionPath, "ExtrusionPath");
 REGISTER_CLASS(ExtrusionLoop, "ExtrusionLoop");
-// there is no ExtrusionLoop::Collection or ExtrusionEntity::Collection
 REGISTER_CLASS(ExtrusionEntityCollection, "ExtrusionPath::Collection");
 REGISTER_CLASS(ExtrusionSimulator, "ExtrusionSimulator");
 REGISTER_CLASS(Filler, "Filler");
 REGISTER_CLASS(Flow, "Flow");
 REGISTER_CLASS(CoolingBuffer, "GCode::CoolingBuffer");
 REGISTER_CLASS(GCode, "GCode");
-REGISTER_CLASS(GCodePreviewData, "GCode::PreviewData");
-REGISTER_CLASS(GCodeSender, "GCode::Sender");
 REGISTER_CLASS(Layer, "Layer");
 REGISTER_CLASS(SupportLayer, "Layer::Support");
 REGISTER_CLASS(LayerRegion, "Layer::Region");
@@ -35,7 +32,6 @@ REGISTER_CLASS(ModelMaterial, "Model::Material");
 REGISTER_CLASS(ModelObject, "Model::Object");
 REGISTER_CLASS(ModelVolume, "Model::Volume");
 REGISTER_CLASS(ModelInstance, "Model::Instance");
-REGISTER_CLASS(MotionPlanner, "MotionPlanner");
 REGISTER_CLASS(BoundingBox, "Geometry::BoundingBox");
 REGISTER_CLASS(BoundingBoxf, "Geometry::BoundingBoxf");
 REGISTER_CLASS(BoundingBoxf3, "Geometry::BoundingBoxf3");
@@ -54,18 +50,6 @@ REGISTER_CLASS(Surface, "Surface");
 REGISTER_CLASS(SurfaceCollection, "Surface::Collection");
 REGISTER_CLASS(PrintObjectSupportMaterial, "Print::SupportMaterial2");
 REGISTER_CLASS(TriangleMesh, "TriangleMesh");
-REGISTER_CLASS(AppConfig, "GUI::AppConfig");
-REGISTER_CLASS(GLShader, "GUI::_3DScene::GLShader");
-REGISTER_CLASS(GLVolume, "GUI::_3DScene::GLVolume");
-REGISTER_CLASS(GLVolumeCollection, "GUI::_3DScene::GLVolume::Collection");
-REGISTER_CLASS(Preset, "GUI::Preset");
-REGISTER_CLASS(PresetCollection, "GUI::PresetCollection");
-REGISTER_CLASS(PresetBundle, "GUI::PresetBundle");
-REGISTER_CLASS(TabIface, "GUI::Tab");
-REGISTER_CLASS(PresetUpdater, "PresetUpdater");
-REGISTER_CLASS(AppController, "AppController");
-REGISTER_CLASS(PrintController, "PrintController");
-REGISTER_CLASS(PrintHost, "PrintHost");
 
 SV* ConfigBase__as_hash(ConfigBase* THIS)
 {
@@ -127,6 +111,8 @@ SV* ConfigOption_to_SV(const ConfigOption &opt, const ConfigOptionDef &def)
     }
     case coPoint:
         return perl_to_SV_clone_ref(static_cast<const ConfigOptionPoint*>(&opt)->value);
+    case coPoint3:
+        return perl_to_SV_clone_ref(static_cast<const ConfigOptionPoint3*>(&opt)->value);
     case coPoints:
     {
         auto optv = static_cast<const ConfigOptionPoints*>(&opt);
@@ -260,6 +246,9 @@ bool ConfigBase__set(ConfigBase* THIS, const t_config_option_key &opt_key, SV* v
     }
     case coPoint:
         return from_SV_check(value, &static_cast<ConfigOptionPoint*>(opt)->value);
+//    case coPoint3:        
+        // not gonna fix it, die Perl die!
+//        return from_SV_check(value, &static_cast<ConfigOptionPoint3*>(opt)->value);
     case coPoints:
     {
         std::vector<Vec2d> &values = static_cast<ConfigOptionPoints*>(opt)->values;
@@ -293,7 +282,7 @@ bool ConfigBase__set(ConfigBase* THIS, const t_config_option_key &opt_key, SV* v
         break;
     }
     default:
-        if (! opt->deserialize(std::string(SvPV_nolen(value))))
+        if (! opt->deserialize(std::string(SvPV_nolen(value)), ForwardCompatibilitySubstitutionRule::Disable))
             return false;
     }
     return true;
@@ -306,7 +295,8 @@ bool ConfigBase__set_deserialize(ConfigBase* THIS, const t_config_option_key &op
     size_t len;
     const char * c = SvPV(str, len);
     std::string value(c, len);
-    return THIS->set_deserialize(opt_key, value);
+    ConfigSubstitutionContext ctxt{ ForwardCompatibilitySubstitutionRule::Disable };
+    return THIS->set_deserialize_nothrow(opt_key, value, ctxt);
 }
 
 void ConfigBase__set_ifndef(ConfigBase* THIS, const t_config_option_key &opt_key, SV* value, bool deserialize)
