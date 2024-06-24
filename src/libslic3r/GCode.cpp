@@ -3531,7 +3531,8 @@ std::string GCodeGenerator::_extrude(
                 // Extrude line segment.
                 if (const double line_length = (p - prev).norm(); line_length > 0) {
                     double dE = e_per_mm * line_length;
-                    if (m_small_area_infill_flow_compensator) {
+                    if (m_small_area_infill_flow_compensator &&
+                        m_config.small_area_infill_flow_compensation.value) {
                         double new_dE = m_small_area_infill_flow_compensator
                                  ->modify_flow(line_length, dE, path_attr.role);
                         if (m_config.gcode_comments) {
@@ -3546,7 +3547,8 @@ std::string GCodeGenerator::_extrude(
                 assert(angle > 0);
                 const double line_length = angle * std::abs(radius);
                 double dE                = e_per_mm * line_length;
-                if (m_small_area_infill_flow_compensator) {
+                if (m_small_area_infill_flow_compensator &&
+                    m_config.small_area_infill_flow_compensation.value) {
                     double new_dE = m_small_area_infill_flow_compensator->modify_flow(line_length, dE, path_attr.role);
                     if (m_config.gcode_comments) {
                         line_comment += create_small_area_flow_compensation_comment(dE, new_dE, line_length);

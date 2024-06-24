@@ -642,6 +642,7 @@ PRINT_CONFIG_CLASS_DEFINE(
     ((ConfigOptionBool,                thick_bridges))
     ((ConfigOptionFloat,               xy_size_compensation))
     ((ConfigOptionBool,                wipe_into_objects))
+    ((ConfigOptionBool, small_area_infill_flow_compensation))
 )
 
 PRINT_CONFIG_CLASS_DEFINE(
@@ -905,7 +906,6 @@ PRINT_CONFIG_CLASS_DERIVED_DEFINE(
     ((ConfigOptionInts,               full_fan_speed_layer))
     ((ConfigOptionFloat,              infill_acceleration))
     ((ConfigOptionBool,               infill_first))
-    ((ConfigOptionBool,               small_area_infill_flow_compensation))
     ((ConfigOptionInts,               max_fan_speed))
     ((ConfigOptionFloats,             max_layer_height))
     ((ConfigOptionInts,               min_fan_speed))
