@@ -5674,8 +5674,23 @@ std::string GCode::_extrude(const ExtrusionPath &path, const std::string &descri
     return gcode;
 }
 
-double_t GCode::_compute_speed_mm_per_sec(const ExtrusionPath& path, double speed) {
+double_t adjust_speed_if_in_forbidden_range(double speed)
+{
+    constexpr std::pair<double, double> FORBIDDEN_RANGE = {50.0f, 70.0f};
+    constexpr bool MOVE_TO_LOWEST_ALLOWED_SPEED = true;
 
+    if (speed > FORBIDDEN_RANGE.first && speed < FORBIDDEN_RANGE.second) {
+        std::cout << "chka46: speed " << speed << " is in forbidden range!" << std::endl;
+        speed = (MOVE_TO_LOWEST_ALLOWED_SPEED) ? FORBIDDEN_RANGE.first : FORBIDDEN_RANGE.second;
+        std::cout << "speed has been " << ((MOVE_TO_LOWEST_ALLOWED_SPEED) ? "lowered" : "increased") << " to "
+                  << speed << std::endl;
+    }
+
+    return speed;
+}
+
+double_t GCode::_compute_speed_mm_per_sec(const ExtrusionPath& path, double speed)
+{
     float factor = 1;
     // set speed
     if (speed < 0) {
@@ -5688,6 +5703,7 @@ double_t GCode::_compute_speed_mm_per_sec(const ExtrusionPath& path, double spee
             speed = m_config.get_computed_value("perimeter_speed");
         } else if (path.role() == erExternalPerimeter) {
             speed = m_config.get_computed_value("external_perimeter_speed");
+            speed = adjust_speed_if_in_forbidden_range(speed);
         } else if (path.role() == erBridgeInfill) {
             speed = m_config.get_computed_value("bridge_speed");
         } else if (path.role() == erInternalBridgeInfill) {
