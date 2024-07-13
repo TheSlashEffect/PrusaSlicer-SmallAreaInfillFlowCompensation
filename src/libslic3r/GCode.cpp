@@ -5674,14 +5674,22 @@ std::string GCode::_extrude(const ExtrusionPath &path, const std::string &descri
     return gcode;
 }
 
-double_t adjust_speed_if_in_forbidden_range(double speed)
+double_t GCode::adjust_speed_if_in_forbidden_range(double speed) const
 {
-    constexpr std::pair<double, double> FORBIDDEN_RANGE = {50.0f, 70.0f};
+    double range_lower_bound = m_config.get_computed_value("exclude_print_speed_low");
+    double range_upper_bound = m_config.get_computed_value("exclude_print_speed_high");
+    std::pair forbidden_range = {range_lower_bound, range_upper_bound};
     constexpr bool MOVE_TO_LOWEST_ALLOWED_SPEED = true;
 
-    if (speed > FORBIDDEN_RANGE.first && speed < FORBIDDEN_RANGE.second) {
-        std::cout << "chka46: speed " << speed << " is in forbidden range!" << std::endl;
-        speed = (MOVE_TO_LOWEST_ALLOWED_SPEED) ? FORBIDDEN_RANGE.first : FORBIDDEN_RANGE.second;
+    if (range_lower_bound != 0.0 && range_upper_bound != 0.0 && range_upper_bound < range_lower_bound) {
+        std::cout << "feature not activated or misconfigures, following are set values:" << std::endl;
+        std::cout << range_lower_bound << ", " << range_upper_bound << std::endl;
+        return speed;
+    }
+
+    if (speed > forbidden_range.first && speed < forbidden_range.second) {
+        std::cout << "chka: Set perimeter speed " << speed << " is in forbidden range!" << std::endl;
+        speed = (MOVE_TO_LOWEST_ALLOWED_SPEED) ? forbidden_range.first : forbidden_range.second;
         std::cout << "speed has been " << ((MOVE_TO_LOWEST_ALLOWED_SPEED) ? "lowered" : "increased") << " to "
                   << speed << std::endl;
     }

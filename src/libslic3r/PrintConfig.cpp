@@ -1941,6 +1941,27 @@ void PrintConfigDef::init_fff_params()
     def->is_vector_extruder = true;
     def->set_default_value(new ConfigOptionFloats{ 0. });
 
+    // TODO - chka: Show better feature description on mouse hover (also show "set to 0 to disable")
+    def = this->add("exclude_print_speed_low", coFloat);
+    def->label = L("Lower bound");
+    def->category = OptionCategory::speed;
+    def->tooltip = L("Start of excluded speed range");
+    def->sidetext = L("mm/s");
+    def->min = 0;
+    def->mode = comAdvancedE | comPrusa;
+    // def->is_vector_extruder = true;
+    def->set_default_value(new ConfigOptionFloat{ 0. });
+
+    def = this->add("exclude_print_speed_high", coFloat);
+    def->label = L("Higher bound");
+    def->category = OptionCategory::speed;
+    def->tooltip = L("End of excluded speed range");
+    def->sidetext = L("mm/s");
+    def->min = 0;
+    def->mode = comAdvancedE | comPrusa;
+    // def->is_vector_extruder = true;
+    def->set_default_value(new ConfigOptionFloat{ 0. });
+
     def = this->add("filament_max_wipe_tower_speed", coFloats);
     def->label = L("Max speed on the wipe tower");
     def->tooltip = L("This setting is used to set the maximum speed when extruding inside the wipe tower (use M220)."
@@ -8096,6 +8117,8 @@ std::unordered_set<std::string> prusa_export_to_remove_keys = {
 "default_speed",
 "enforce_full_fill_volume",
 // "exact_last_layer_height",
+"exclude_print_speed_low"
+"exclude_print_speed_high"
 "external_infill_margin",
 "external_perimeter_acceleration",
 "external_perimeter_cut_corners",

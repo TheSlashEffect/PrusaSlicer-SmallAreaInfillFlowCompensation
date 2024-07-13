@@ -1287,6 +1287,8 @@ PRINT_CONFIG_CLASS_DERIVED_DEFINE(
     ((ConfigOptionFloats,               wiping_volumes_extruders))
     ((ConfigOptionFloat,                z_offset))
     ((ConfigOptionFloat,                init_z_rotate))
+    ((ConfigOptionFloat,                exclude_print_speed_low))
+    ((ConfigOptionFloat,                exclude_print_speed_high))
 
 )
 
