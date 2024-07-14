@@ -5679,7 +5679,7 @@ double_t GCode::adjust_speed_if_in_forbidden_range(double speed) const
     double range_lower_bound = m_config.get_computed_value("exclude_print_speed_low");
     double range_upper_bound = m_config.get_computed_value("exclude_print_speed_high");
     std::pair forbidden_range = {range_lower_bound, range_upper_bound};
-    constexpr bool MOVE_TO_LOWEST_ALLOWED_SPEED = true;
+    bool move_to_lowest_allowed_speed = m_config.exclude_print_speed_move_to_lowest_available_range.value;
 
     if (range_lower_bound != 0.0 && range_upper_bound != 0.0 && range_upper_bound < range_lower_bound) {
         std::cout << "feature not activated or misconfigures, following are set values:" << std::endl;
@@ -5689,8 +5689,8 @@ double_t GCode::adjust_speed_if_in_forbidden_range(double speed) const
 
     if (speed > forbidden_range.first && speed < forbidden_range.second) {
         std::cout << "chka: Set perimeter speed " << speed << " is in forbidden range!" << std::endl;
-        speed = (MOVE_TO_LOWEST_ALLOWED_SPEED) ? forbidden_range.first : forbidden_range.second;
-        std::cout << "speed has been " << ((MOVE_TO_LOWEST_ALLOWED_SPEED) ? "lowered" : "increased") << " to "
+        speed = (move_to_lowest_allowed_speed) ? forbidden_range.first : forbidden_range.second;
+        std::cout << "speed has been " << ((move_to_lowest_allowed_speed) ? "lowered" : "increased") << " to "
                   << speed << std::endl;
     }
 

@@ -1289,6 +1289,7 @@ PRINT_CONFIG_CLASS_DERIVED_DEFINE(
     ((ConfigOptionFloat,                init_z_rotate))
     ((ConfigOptionFloat,                exclude_print_speed_low))
     ((ConfigOptionFloat,                exclude_print_speed_high))
+    ((ConfigOptionBool,                 exclude_print_speed_move_to_lowest_available_range))
 
 )
 

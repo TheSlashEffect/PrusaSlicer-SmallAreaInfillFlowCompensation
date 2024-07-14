@@ -1960,7 +1960,15 @@ void PrintConfigDef::init_fff_params()
     def->min = 0;
     def->mode = comAdvancedE | comPrusa;
     // def->is_vector_extruder = true;
-    def->set_default_value(new ConfigOptionFloat{ 0. });
+    def->set_default_value(new ConfigOptionFloat{0.});
+
+    def             = this->add("exclude_print_speed_move_to_lowest_available_range", coBool);
+    def->label      = L("Adjust speed to lowest range");
+    def->category   = OptionCategory::speed;
+    def->tooltip    = L("If set to true, the speed is dropped to the lowest value of the forbidden range."
+                        "Otherwise, the highest value of the range is chosen.");
+    def->mode       = comAdvancedE | comSuSi;
+    def->set_default_value(new ConfigOptionBool(true));
 
     def = this->add("filament_max_wipe_tower_speed", coFloats);
     def->label = L("Max speed on the wipe tower");
@@ -8118,7 +8126,8 @@ std::unordered_set<std::string> prusa_export_to_remove_keys = {
 "enforce_full_fill_volume",
 // "exact_last_layer_height",
 "exclude_print_speed_low"
-"exclude_print_speed_high"
+"exclude_print_speed_high",
+"exclude_print_speed_move_to_lowest_available_range",
 "external_infill_margin",
 "external_perimeter_acceleration",
 "external_perimeter_cut_corners",

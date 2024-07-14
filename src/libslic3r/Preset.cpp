@@ -544,6 +544,7 @@ static std::vector<std::string> s_Preset_print_options {
         "max_volumetric_speed",
         "exclude_print_speed_low",
         "exclude_print_speed_high",
+        "exclude_print_speed_move_to_lowest_available_range",
         // gapfill
         "gap_fill_enabled",
         "gap_fill_extension",
