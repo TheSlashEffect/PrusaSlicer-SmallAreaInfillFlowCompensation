@@ -5718,6 +5718,7 @@ double_t GCode::_compute_speed_mm_per_sec(const ExtrusionPath& path, double spee
             speed = m_config.get_computed_value("bridge_speed_internal");
         } else if (path.role() == erOverhangPerimeter) {
             speed = m_config.get_computed_value("overhangs_speed");
+            speed = adjust_speed_if_in_forbidden_range(speed);
         } else if (path.role() == erInternalInfill) {
             speed = m_config.get_computed_value("infill_speed");
         } else if (path.role() == erSolidInfill) {
