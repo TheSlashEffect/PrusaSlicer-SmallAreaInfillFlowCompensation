@@ -5795,6 +5795,7 @@ double_t GCode::_compute_speed_mm_per_sec(const ExtrusionPath& path, double spee
     // Apply small perimeter 'modifier
     //  don't modify bridge speed
     if (factor < 1 && !(is_bridge(path.role()))) {
+        // TODO - This does not work as expected. Needs to be fixed.
         float small_speed = (float)m_config.small_perimeter_speed.get_abs_value(m_config.get_computed_value("perimeter_speed"));
         if (small_speed > 0)
             //apply factor between feature speed and small speed
