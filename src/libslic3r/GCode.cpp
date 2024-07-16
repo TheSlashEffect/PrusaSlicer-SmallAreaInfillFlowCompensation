@@ -5719,25 +5719,14 @@ double_t GCode::adjust_speed_if_in_forbidden_range(double speed) const
         int range_end_back = numeric_ranges[i - 1].second;
         if (range_start_front < range_end_back) {
             return speed;
-            /*
-            auto first_range = std::to_string(numeric_ranges[i].first) + "-" +
-                std::to_string(numeric_ranges[i].second);
-            auto second_range = std::to_string(numeric_ranges[i - 1].first) + "-" +
-                std::to_string(numeric_ranges[i - 1].second);
-            std::cout << "Ranges " << first_range << " and " << second_range << " overlap." << std::endl;
-            */
         }
     }
 
     bool move_to_lowest_allowed_speed = m_config.exclude_print_speed_move_to_lowest_available_range.value;
     for (auto range : numeric_ranges) {
         if (speed > range.first && speed < range.second) {
-            // std::string range_str = std::to_string(range.first) + "-" + std::to_string(range.second);
-            // std::cout << "We have an overlap with range " << range_str << std::endl;
             speed = (move_to_lowest_allowed_speed) ? range.first : range.second;
             break;
-            // std::cout << "speed has been " << ((move_to_lowest_allowed_speed) ? "lowered" : "increased") << " to "
-                      // << speed << std::endl;
         }
     }
 
