@@ -5726,7 +5726,7 @@ double_t GCode::adjust_speed_if_in_forbidden_range(double speed) const
     for (auto range : numeric_ranges) {
         if (speed > range.first && speed < range.second) {
             speed = (move_to_lowest_allowed_speed) ? range.first : range.second;
-            break;
+            return speed;
         }
     }
 
