@@ -1473,12 +1473,14 @@ void GCode::_do_export(Print& print_mod, GCodeOutputStream &file, ThumbnailsGene
         m_pressure_equalizer = make_unique<PressureEqualizer>(print.config());
     m_enable_extrusion_role_markers = (bool)m_pressure_equalizer;
 
-    if (!print.config().exclude_print_speed_ranges.empty()) {
-        m_exclude_print_speeds =
-            make_unique<ExcludePrintSpeeds>(print.config().exclude_print_speed_ranges,
-                                            print.config().exclude_print_speed_move_to_lowest_available_range);
-    } else {
-        std::cout << "chka46: No ranges set! Not proceeding with ExcludePrintSpeeds initialization" << std::endl;
+    try {
+        if (!print.config().exclude_print_speed_ranges.empty()) {
+            m_exclude_print_speeds =
+                make_unique<ExcludePrintSpeeds>(print.config().exclude_print_speed_ranges,
+                                                print.config().exclude_print_speed_move_to_lowest_available_range);
+        }
+    } catch (std::exception &e) {
+        throw Slic3r::SlicingError(_(L("Error on excluded print speeds:\n") + _(L(e.what()))));
     }
 
     std::string preamble_to_put_start_layer = "";

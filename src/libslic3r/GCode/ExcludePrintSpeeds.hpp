@@ -16,13 +16,10 @@ static constexpr size_t UPPER_BOUND_MATCH_INDEX = 2;
     std::vector<std::pair<int, int>> forbidden_ranges;
     bool move_to_lowest_allowed_speed{true};
 
-
-
 public:
-    ExcludePrintSpeeds(const std::string& _forbidden_ranges_user_input, bool _move_to_lowest_available_range);
+    ExcludePrintSpeeds(const std::string &_forbidden_ranges_user_input, bool _move_to_lowest_available_range);
 
     double_t adjust_speed_if_in_forbidden_range(double speed);
-
 };
 
 }

@@ -25,9 +25,9 @@ ExcludePrintSpeeds::ExcludePrintSpeeds(const std::string &_forbidden_ranges_user
     for (const auto &elem : forbidden_ranges_strings) {
         std::smatch regex_match;
         if (!std::regex_match(elem, regex_match, numeric_range_regex)) {
-            std::cout << "Range element " << elem << " does not match int-int format" << std::endl;
-            // return speed;
-            return; // TODO
+            throw Slic3r::SlicingError("Invalid range " + elem +
+                                       ". Range must have start and end values,"
+                                       " separated by \"-\" (example: 30 - 50)");
         }
 
         constexpr size_t LOWER_BOUND_MATCH_INDEX = 1;
@@ -35,8 +35,7 @@ ExcludePrintSpeeds::ExcludePrintSpeeds(const std::string &_forbidden_ranges_user
         auto             lower_bound             = std::stoi(regex_match[LOWER_BOUND_MATCH_INDEX]);
         auto             higher_bound            = std::stoi(regex_match[UPPER_BOUND_MATCH_INDEX]);
         if (lower_bound >= higher_bound) {
-            std::cout << "Invalid range: " << elem << ". Upper bound must be greater than lower bound." << std::endl;
-            return; // TODO
+            throw Slic3r::SlicingError("Invalid range " + elem + ". Upper bound must be greater than lower bound.");
         }
         forbidden_ranges.emplace_back(lower_bound, higher_bound);
     }
@@ -47,10 +46,9 @@ ExcludePrintSpeeds::ExcludePrintSpeeds(const std::string &_forbidden_ranges_user
               [](auto &left, auto &right) { return left.first < right.first; });
 
     for (size_t i = 1; i < forbidden_ranges.size(); i++) {
-        int range_start_front = forbidden_ranges[i].first;
-        int range_end_back    = forbidden_ranges[i - 1].second;
-        if (range_start_front < range_end_back) {
-            return; // TODO
+        if (forbidden_ranges[i].first < forbidden_ranges[i - 1].second) {
+            throw Slic3r::SlicingError("Ranges " + forbidden_ranges_strings[i - 1] + " and " +
+                                       forbidden_ranges_strings[i] + " overlap.");
         }
     }
 }
