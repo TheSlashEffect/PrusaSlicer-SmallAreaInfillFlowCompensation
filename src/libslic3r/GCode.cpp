@@ -17,7 +17,6 @@
 #include "libslic3r/format.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <cstdlib>
 #include <chrono>
 #include <map>
@@ -1473,6 +1472,14 @@ void GCode::_do_export(Print& print_mod, GCodeOutputStream &file, ThumbnailsGene
         print.config().max_volumetric_extrusion_rate_slope_negative.value > 0)
         m_pressure_equalizer = make_unique<PressureEqualizer>(print.config());
     m_enable_extrusion_role_markers = (bool)m_pressure_equalizer;
+
+    if (!print.config().exclude_print_speed_ranges.empty()) {
+        m_exclude_print_speeds =
+            make_unique<ExcludePrintSpeeds>(print.config().exclude_print_speed_ranges,
+                                            print.config().exclude_print_speed_move_to_lowest_available_range);
+    } else {
+        std::cout << "chka46: No ranges set! Not proceeding with ExcludePrintSpeeds initialization" << std::endl;
+    }
 
     std::string preamble_to_put_start_layer = "";
 
@@ -5675,65 +5682,6 @@ std::string GCode::_extrude(const ExtrusionPath &path, const std::string &descri
     return gcode;
 }
 
-double_t GCode::adjust_speed_if_in_forbidden_range(double speed) const
-{
-    std::string forbidden_ranges_user_input = m_config.exclude_print_speed_ranges;
-    if (forbidden_ranges_user_input.empty()) {
-        return speed;
-    }
-
-    forbidden_ranges_user_input.erase(std::remove_if(forbidden_ranges_user_input.begin(), forbidden_ranges_user_input.end(), ::isspace),
-                           forbidden_ranges_user_input.end());
-
-    std::vector<std::string> forbidden_ranges_strings;
-    boost::split(forbidden_ranges_strings, forbidden_ranges_user_input, boost::is_any_of(","));
-
-    // Parse input (check string regex and convert to numeric)
-    std::vector<std::pair<int, int>> numeric_ranges;
-    auto numeric_range_regex = std::regex("^(\\d+)-(\\d+)$");
-    for (auto elem : forbidden_ranges_strings) {
-        std::smatch regex_match;
-        if (!std::regex_match(elem, regex_match, numeric_range_regex)) {
-            std::cout << "Range element " << elem << " does not match int-int format" << std::endl;
-            return speed;
-        }
-
-        constexpr size_t LOWER_BOUND_MATCH_INDEX = 1;
-        constexpr size_t UPPER_BOUND_MATCH_INDEX = 2;
-        auto lower_bound = std::stoi(regex_match[LOWER_BOUND_MATCH_INDEX]);
-        auto higher_bound = std::stoi(regex_match[UPPER_BOUND_MATCH_INDEX]);
-        if (lower_bound >= higher_bound) {
-            std::cout << "Invalid range: " << elem << ". Upper bound must be greater than lower bound." << std::endl;
-            return speed;
-        }
-        numeric_ranges.emplace_back(std::pair(lower_bound, higher_bound));
-    }
-
-    // Check range consistency (Simply check for overlap. User can enter them in non-ascending lower bound order)
-
-    std::sort(numeric_ranges.begin(), numeric_ranges.end(),
-              [](auto &left, auto &right) { return left.first < right.first; });
-
-    for (size_t i = 1; i < numeric_ranges.size(); i++) {
-        int range_start_front = numeric_ranges[i].first;
-        int range_end_back = numeric_ranges[i - 1].second;
-        if (range_start_front < range_end_back) {
-            return speed;
-        }
-    }
-
-    bool move_to_lowest_allowed_speed = m_config.exclude_print_speed_move_to_lowest_available_range.value;
-    for (auto range : numeric_ranges) {
-        if (speed > range.first && speed < range.second) {
-            speed = (move_to_lowest_allowed_speed) ? range.first : range.second;
-            return speed;
-        }
-    }
-
-    return speed;
-}
-
-
 double_t GCode::_compute_speed_mm_per_sec(const ExtrusionPath& path, double speed)
 {
     float factor = 1;
@@ -5748,14 +5696,18 @@ double_t GCode::_compute_speed_mm_per_sec(const ExtrusionPath& path, double spee
             speed = m_config.get_computed_value("perimeter_speed");
         } else if (path.role() == erExternalPerimeter) {
             speed = m_config.get_computed_value("external_perimeter_speed");
-            speed = adjust_speed_if_in_forbidden_range(speed);
+            if (m_exclude_print_speeds) {
+                speed = m_exclude_print_speeds->adjust_speed_if_in_forbidden_range(speed);
+            }
         } else if (path.role() == erBridgeInfill) {
             speed = m_config.get_computed_value("bridge_speed");
         } else if (path.role() == erInternalBridgeInfill) {
             speed = m_config.get_computed_value("bridge_speed_internal");
         } else if (path.role() == erOverhangPerimeter) {
             speed = m_config.get_computed_value("overhangs_speed");
-            speed = adjust_speed_if_in_forbidden_range(speed);
+            if (m_exclude_print_speeds) {
+                speed = m_exclude_print_speeds->adjust_speed_if_in_forbidden_range(speed);
+            }
         } else if (path.role() == erInternalInfill) {
             speed = m_config.get_computed_value("infill_speed");
         } else if (path.role() == erSolidInfill) {
