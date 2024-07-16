@@ -5688,10 +5688,6 @@ double_t GCode::adjust_speed_if_in_forbidden_range(double speed) const
     std::vector<std::string> forbidden_ranges_strings;
     boost::split(forbidden_ranges_strings, forbidden_ranges_user_input, boost::is_any_of(","));
 
-    for (size_t i = 0; i < forbidden_ranges_strings.size(); i++) {
-        std::cout << forbidden_ranges_strings[i] << std::endl;
-    }
-
     // Parse input (check string regex and convert to numeric)
     std::vector<std::pair<int, int>> numeric_ranges;
     auto numeric_range_regex = std::regex("^(\\d+)-(\\d+)$");
