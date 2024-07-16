@@ -1941,26 +1941,15 @@ void PrintConfigDef::init_fff_params()
     def->is_vector_extruder = true;
     def->set_default_value(new ConfigOptionFloats{ 0. });
 
-    // TODO - chka: Show better feature description on mouse hover (also show "set to 0 to disable")
-    def = this->add("exclude_print_speed_low", coFloat);
-    def->label = L("Lower bound");
-    def->category = OptionCategory::speed;
-    def->tooltip = L("Start of excluded speed range");
-    def->sidetext = L("mm/s");
-    def->min = 0;
-    def->mode = comAdvancedE | comPrusa;
+    // TODO - chka: Show better feature description on mouse hover. Describe use cases and interaction with
+    //   other features.
+    def = this->add("exclude_print_speed_ranges", coString);
+    def->label = L("Excluded speed ranges (in mm/s)");
+    def->tooltip = L("Speed ranges to be excluded. One use case is to avoid CoreXY kinematic resonances. "
+                     "Leave empty to disable");
+    def->mode = comExpert | comPrusa;
     // def->is_vector_extruder = true;
-    def->set_default_value(new ConfigOptionFloat{ 0. });
-
-    def = this->add("exclude_print_speed_high", coFloat);
-    def->label = L("Higher bound");
-    def->category = OptionCategory::speed;
-    def->tooltip = L("End of excluded speed range");
-    def->sidetext = L("mm/s");
-    def->min = 0;
-    def->mode = comAdvancedE | comPrusa;
-    // def->is_vector_extruder = true;
-    def->set_default_value(new ConfigOptionFloat{0.});
+    def->set_default_value(new ConfigOptionString{""});
 
     def             = this->add("exclude_print_speed_move_to_lowest_available_range", coBool);
     def->label      = L("Adjust speed to lowest range");
@@ -8125,8 +8114,7 @@ std::unordered_set<std::string> prusa_export_to_remove_keys = {
 "default_speed",
 "enforce_full_fill_volume",
 // "exact_last_layer_height",
-"exclude_print_speed_low"
-"exclude_print_speed_high",
+"exclude_print_speed_ranges"
 "exclude_print_speed_move_to_lowest_available_range",
 "external_infill_margin",
 "external_perimeter_acceleration",

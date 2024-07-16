@@ -337,8 +337,7 @@ group:Speed for non-print moves
 	end_line
 group:Exclude print speeds
 	line:Exclude print speeds (beta)
-		setting:label_width$8:width$4:exclude_print_speed_low
-		setting:label_width$8:width$4:exclude_print_speed_high
+		setting:label_width$8:width$4:exclude_print_speed_ranges
 		setting:exclude_print_speed_move_to_lowest_available_range
 group:sidetext_width$7:Modifiers
 	line:First layer speed

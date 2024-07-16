@@ -347,8 +347,7 @@ group:label_width$8:sidetext_width$7:Speed for print moves
 		setting:width$4:label$Wipe starting speed:wipe_tower_wipe_starting_speed
 group:Exclude print speeds
 	line:Exclude print speeds (beta)
-        setting:label_width$8:width$4:exclude_print_speed_low
-        setting:label_width$8:width$4:exclude_print_speed_high
+        setting:label_width$8:width$4:exclude_print_speed_ranges
 		setting:exclude_print_speed_move_to_lowest_available_range
 group:Speed for non-print moves
 	line:Travel speed

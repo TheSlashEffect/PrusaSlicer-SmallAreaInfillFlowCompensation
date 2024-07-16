@@ -17,6 +17,7 @@
 #include "libslic3r/format.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <chrono>
 #include <map>
@@ -5676,26 +5677,79 @@ std::string GCode::_extrude(const ExtrusionPath &path, const std::string &descri
 
 double_t GCode::adjust_speed_if_in_forbidden_range(double speed) const
 {
-    double range_lower_bound = m_config.get_computed_value("exclude_print_speed_low");
-    double range_upper_bound = m_config.get_computed_value("exclude_print_speed_high");
-    std::pair forbidden_range = {range_lower_bound, range_upper_bound};
-    bool move_to_lowest_allowed_speed = m_config.exclude_print_speed_move_to_lowest_available_range.value;
-
-    if (range_lower_bound != 0.0 && range_upper_bound != 0.0 && range_upper_bound < range_lower_bound) {
-        std::cout << "feature not activated or misconfigures, following are set values:" << std::endl;
-        std::cout << range_lower_bound << ", " << range_upper_bound << std::endl;
+    std::string forbidden_ranges_user_input = m_config.exclude_print_speed_ranges;
+    if (forbidden_ranges_user_input.empty()) {
         return speed;
     }
 
-    if (speed > forbidden_range.first && speed < forbidden_range.second) {
-        std::cout << "chka: Set perimeter speed " << speed << " is in forbidden range!" << std::endl;
-        speed = (move_to_lowest_allowed_speed) ? forbidden_range.first : forbidden_range.second;
-        std::cout << "speed has been " << ((move_to_lowest_allowed_speed) ? "lowered" : "increased") << " to "
-                  << speed << std::endl;
+    forbidden_ranges_user_input.erase(std::remove_if(forbidden_ranges_user_input.begin(), forbidden_ranges_user_input.end(), ::isspace),
+                           forbidden_ranges_user_input.end());
+
+    std::vector<std::string> forbidden_ranges_strings;
+    boost::split(forbidden_ranges_strings, forbidden_ranges_user_input, boost::is_any_of(","));
+
+    for (size_t i = 0; i < forbidden_ranges_strings.size(); i++) {
+        std::cout << forbidden_ranges_strings[i] << std::endl;
+    }
+
+    // Parse input (check string regex and convert to numeric)
+    std::vector<std::pair<int, int>> numeric_ranges;
+    auto numeric_range_regex = std::regex("^(\\d+)-(\\d+)$");
+    for (auto elem : forbidden_ranges_strings) {
+        constexpr size_t LOWER_BOUND_MATCH_INDEX = 1;
+        constexpr size_t UPPER_BOUND_MATCH_INDEX = 2;
+        if (!std::regex_match(elem, numeric_range_regex)) {
+            std::cout << "Range element " << elem << " does not match {int-int} format" << std::endl;
+            break;
+        }
+
+        std::smatch regex_match;
+        std::regex_match(elem, regex_match, numeric_range_regex);
+
+        auto lower_bound = std::stoi(regex_match[LOWER_BOUND_MATCH_INDEX]);
+        auto higher_bound = std::stoi(regex_match[UPPER_BOUND_MATCH_INDEX]);
+        if (lower_bound >= higher_bound) {
+            std::cout << "Invalid range: " << elem << ". Upper bound must be greater than lower bound." << std::endl;
+            return speed;
+        }
+        numeric_ranges.emplace_back(std::pair(lower_bound, higher_bound));
+    }
+
+    // Check range consistency (Simply check for overlap. User can enter them in non-ascending lower bound order)
+
+    std::sort(numeric_ranges.begin(), numeric_ranges.end(),
+              [](auto &left, auto &right) { return left.first < right.first; });
+
+    for (size_t i = 1; i < numeric_ranges.size(); i++) {
+        int range_start_front = numeric_ranges[i].first;
+        int range_end_back = numeric_ranges[i - 1].second;
+        if (range_start_front < range_end_back) {
+            return speed;
+            /*
+            auto first_range = std::to_string(numeric_ranges[i].first) + "-" +
+                std::to_string(numeric_ranges[i].second);
+            auto second_range = std::to_string(numeric_ranges[i - 1].first) + "-" +
+                std::to_string(numeric_ranges[i - 1].second);
+            std::cout << "Ranges " << first_range << " and " << second_range << " overlap." << std::endl;
+            */
+        }
+    }
+
+    bool move_to_lowest_allowed_speed = m_config.exclude_print_speed_move_to_lowest_available_range.value;
+    for (auto range : numeric_ranges) {
+        if (speed > range.first && speed < range.second) {
+            // std::string range_str = std::to_string(range.first) + "-" + std::to_string(range.second);
+            // std::cout << "We have an overlap with range " << range_str << std::endl;
+            speed = (move_to_lowest_allowed_speed) ? range.first : range.second;
+            break;
+            // std::cout << "speed has been " << ((move_to_lowest_allowed_speed) ? "lowered" : "increased") << " to "
+                      // << speed << std::endl;
+        }
     }
 
     return speed;
 }
+
 
 double_t GCode::_compute_speed_mm_per_sec(const ExtrusionPath& path, double speed)
 {
