@@ -5696,16 +5696,14 @@ double_t GCode::adjust_speed_if_in_forbidden_range(double speed) const
     std::vector<std::pair<int, int>> numeric_ranges;
     auto numeric_range_regex = std::regex("^(\\d+)-(\\d+)$");
     for (auto elem : forbidden_ranges_strings) {
-        constexpr size_t LOWER_BOUND_MATCH_INDEX = 1;
-        constexpr size_t UPPER_BOUND_MATCH_INDEX = 2;
-        if (!std::regex_match(elem, numeric_range_regex)) {
-            std::cout << "Range element " << elem << " does not match {int-int} format" << std::endl;
-            break;
+        std::smatch regex_match;
+        if (!std::regex_match(elem, regex_match, numeric_range_regex)) {
+            std::cout << "Range element " << elem << " does not match int-int format" << std::endl;
+            return speed;
         }
 
-        std::smatch regex_match;
-        std::regex_match(elem, regex_match, numeric_range_regex);
-
+        constexpr size_t LOWER_BOUND_MATCH_INDEX = 1;
+        constexpr size_t UPPER_BOUND_MATCH_INDEX = 2;
         auto lower_bound = std::stoi(regex_match[LOWER_BOUND_MATCH_INDEX]);
         auto higher_bound = std::stoi(regex_match[UPPER_BOUND_MATCH_INDEX]);
         if (lower_bound >= higher_bound) {
