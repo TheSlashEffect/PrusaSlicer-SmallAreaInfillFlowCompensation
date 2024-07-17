@@ -193,6 +193,11 @@ enum InfillConnection {
     icConnected, icHoles, icOuterShell, icNotConnected,
 };
 
+enum ExcludePrintSpeedsAdjustmentDirection
+{
+    epsdLowest, epsdHighest, epsdNearest
+};
+
 enum RemainingTimeType : uint8_t{
     rtNone      = 0,
     rtM117      = 1<<0,
@@ -300,6 +305,7 @@ CONFIG_OPTION_ENUM_DECLARE_STATIC_MAPS(DraftShield)
 CONFIG_OPTION_ENUM_DECLARE_STATIC_MAPS(GCodeThumbnailsFormat)
 CONFIG_OPTION_ENUM_DECLARE_STATIC_MAPS(ZLiftTop)
 CONFIG_OPTION_ENUM_DECLARE_STATIC_MAPS(PerimeterGeneratorType)
+CONFIG_OPTION_ENUM_DECLARE_STATIC_MAPS(ExcludePrintSpeedsAdjustmentDirection)
 
 #undef CONFIG_OPTION_ENUM_DECLARE_STATIC_MAPS
 
@@ -1288,7 +1294,7 @@ PRINT_CONFIG_CLASS_DERIVED_DEFINE(
     ((ConfigOptionFloat,                z_offset))
     ((ConfigOptionFloat,                init_z_rotate))
     ((ConfigOptionString,               exclude_print_speed_ranges))
-    ((ConfigOptionBool,                 exclude_print_speed_move_to_lowest_available_range))
+    ((ConfigOptionEnum<ExcludePrintSpeedsAdjustmentDirection>,  exclude_print_speed_adjustment_direction))
 
 )
 

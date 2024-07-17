@@ -348,7 +348,7 @@ group:label_width$8:sidetext_width$7:Speed for print moves
 group:Exclude print speeds
 	line:Exclude print speeds (beta)
 		setting:label_width$12:width$26:exclude_print_speed_ranges
-		setting:exclude_print_speed_move_to_lowest_available_range
+		setting:exclude_print_speed_adjustment_direction
 group:Speed for non-print moves
 	line:Travel speed
 		setting:label$xy:travel_speed

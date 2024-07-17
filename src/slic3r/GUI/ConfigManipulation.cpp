@@ -341,7 +341,7 @@ void ConfigManipulation::toggle_print_fff_options(DynamicPrintConfig* config)
         "overhangs", "perimeter_speed", "perimeter_reverse",
         "seam_position", "small_perimeter_speed", "small_perimeter_min_length", " small_perimeter_max_length", "spiral_vase",
         "perimeter_generator", "seam_notch_all", "seam_notch_inner", "seam_notch_outer",
-        "exclude_print_speed_ranges", "exclude_print_speed_move_to_lowest_available_range"})
+        "exclude_print_speed_ranges", "exclude_print_speed_adjustment_direction"})
         toggle_field(el, have_perimeters);
 
     bool has_spiral_vase = have_perimeters && config->opt_bool("spiral_vase");

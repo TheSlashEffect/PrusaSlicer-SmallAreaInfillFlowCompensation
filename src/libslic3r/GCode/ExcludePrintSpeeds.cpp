@@ -6,11 +6,11 @@
 
 namespace Slic3r {
 
+// TODO - CHKA: Clean code; extract functions
 ExcludePrintSpeeds::ExcludePrintSpeeds(const std::string &_forbidden_ranges_user_input,
-                                       bool               _move_to_lowest_available_speed)
+    const ConfigOptionEnum<ExcludePrintSpeedsAdjustmentDirection> &_adjustment_direction)
 {
-    std::cout << "chka46: initializing ExcludePrintSpeeds" << std::endl;
-    move_to_lowest_allowed_speed            = _move_to_lowest_available_speed;
+    adjustment_direction                    = _adjustment_direction;
     std::string forbidden_ranges_user_input = _forbidden_ranges_user_input;
 
     forbidden_ranges_user_input.erase(std::remove_if(forbidden_ranges_user_input.begin(),
@@ -58,7 +58,24 @@ double_t ExcludePrintSpeeds::adjust_speed_if_in_forbidden_range(double speed)
 {
     for (auto range : forbidden_ranges) {
         if (speed > range.first && speed < range.second) {
-            speed = (move_to_lowest_allowed_speed) ? range.first : range.second;
+            switch (adjustment_direction) {
+            case epsdLowest:
+                speed = range.first;
+                break;
+            case epsdHighest:
+                speed = range.second;
+                break;
+            case epsdNearest:
+                if ((speed - range.first) < (range.second - speed)) {
+                    speed = range.first;
+                } else {
+                    speed = range.second;
+                }
+                break;
+            default:
+                return speed;
+            }
+
             return speed;
         }
     }

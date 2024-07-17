@@ -317,6 +317,13 @@ static t_config_enum_values s_keys_map_PerimeterGeneratorType {
 };
 CONFIG_OPTION_ENUM_DEFINE_STATIC_MAPS(PerimeterGeneratorType)
 
+static const t_config_enum_values s_keys_map_ExcludePrintSpeedsAdjustmentDirection {
+        {"lowest",  epsdLowest},
+        {"highest", epsdHighest},
+        {"nearest", epsdNearest}
+};
+CONFIG_OPTION_ENUM_DEFINE_STATIC_MAPS(ExcludePrintSpeedsAdjustmentDirection)
+
 static void assign_printer_technology_to_unknown(t_optiondef_map &options, PrinterTechnology printer_technology)
 {
     for (std::pair<const t_config_option_key, ConfigOptionDef> &kvp : options)
@@ -1951,13 +1958,26 @@ void PrintConfigDef::init_fff_params()
     // def->is_vector_extruder = true;
     def->set_default_value(new ConfigOptionString{""});
 
-    def             = this->add("exclude_print_speed_move_to_lowest_available_range", coBool);
-    def->label      = L("Adjust speed to lowest range");
-    def->category   = OptionCategory::speed;
-    def->tooltip    = L("If set to true, the speed is dropped to the lowest value of the forbidden range."
-                        "Otherwise, the highest value of the range is chosen.");
-    def->mode       = comAdvancedE | comSuSi;
-    def->set_default_value(new ConfigOptionBool(true));
+    def = this->add("exclude_print_speed_adjustment_direction", coEnum);
+    def->label = L("Adjustment direction");
+    def->full_label = L("Exclude print speed adjustment direction");
+    def->category = OptionCategory::speed;
+    def->tooltip = L("This option decides which direction to adjust any invalid print speeds."
+//        "\n * None: Warn the user that print speeds in the invalid region are in effect, but do not alter them." // TODO - CHKA
+        "\n * Lowest:  drop the speed to the lowest value of the range."
+        "\n * Highest: raise the speed to the highest value of the range."
+        "\n * Nearest: change the speed to whichever value of the above is closest to the speed set.");
+    def->enum_keys_map = &ConfigOptionEnum<ExcludePrintSpeedsAdjustmentDirection>::get_enum_values();
+//    def->enum_values.push_back("none");
+    def->enum_values.emplace_back("lowest");
+    def->enum_values.emplace_back("highest");
+    def->enum_values.emplace_back("nearest");
+//    def->enum_labels.push_back(L("None"));
+    def->enum_labels.emplace_back(L("Lowest"));
+    def->enum_labels.emplace_back(L("Highest"));
+    def->enum_labels.emplace_back(L("Nearest"));
+    def->mode = comAdvancedE | comSuSi;
+    def->set_default_value(new ConfigOptionEnum<ExcludePrintSpeedsAdjustmentDirection>(epsdLowest));
 
     def = this->add("filament_max_wipe_tower_speed", coFloats);
     def->label = L("Max speed on the wipe tower");
@@ -8114,8 +8134,8 @@ std::unordered_set<std::string> prusa_export_to_remove_keys = {
 "default_speed",
 "enforce_full_fill_volume",
 // "exact_last_layer_height",
-"exclude_print_speed_ranges"
-"exclude_print_speed_move_to_lowest_available_range",
+"exclude_print_speed_ranges",
+"exclude_print_speed_adjustment_direction",
 "external_infill_margin",
 "external_perimeter_acceleration",
 "external_perimeter_cut_corners",
