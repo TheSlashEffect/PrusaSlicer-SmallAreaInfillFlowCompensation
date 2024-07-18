@@ -1952,8 +1952,11 @@ void PrintConfigDef::init_fff_params()
     //   other features.
     def = this->add("exclude_print_speed_ranges", coString);
     def->label = L("Excluded speed ranges (in mm/s)");
-    def->tooltip = L("Speed ranges to be excluded. One use case is to avoid CoreXY kinematic resonances. "
-                     "Leave empty to disable");
+    def->tooltip = L("Speed ranges to be excluded. If any speeds fall in these ranges, they will be raised/lowered "
+                     "based on the adjustment direction. In its current state, only speeds set by the user in the speed "
+                     "section will be affected, not speeds set by the minimum layer time. One use case for this feature"
+                     " is to avoid CoreXY kinematic resonances. "
+                     "Leave empty to disable.");
     def->mode = comExpert | comPrusa;
     // def->is_vector_extruder = true;
     def->set_default_value(new ConfigOptionString{""});
