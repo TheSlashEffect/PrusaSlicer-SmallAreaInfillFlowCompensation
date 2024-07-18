@@ -1959,7 +1959,7 @@ void PrintConfigDef::init_fff_params()
         " is to avoid CoreXY kinematic resonances. In its current state, only speeds set by the user in the speed "
         "section will be affected, not speeds set by the minimum layer time. "
         "\nLeave empty to disable.");
-    def->mode = comExpert | comPrusa;
+    def->mode = comExpert | comSuSi;
     // def->is_vector_extruder = true;
     def->set_default_value(new ConfigOptionString{""});
 
@@ -1981,7 +1981,7 @@ void PrintConfigDef::init_fff_params()
     def->enum_labels.emplace_back(L("Lowest"));
     def->enum_labels.emplace_back(L("Highest"));
     def->enum_labels.emplace_back(L("Nearest"));
-    def->mode = comAdvancedE | comSuSi;
+    def->mode = comExpert | comSuSi;
     def->set_default_value(new ConfigOptionEnum<ExcludePrintSpeedsAdjustmentDirection>(epsdLowest));
 
     def = this->add("filament_max_wipe_tower_speed", coFloats);
