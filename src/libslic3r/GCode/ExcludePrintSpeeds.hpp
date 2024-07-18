@@ -13,8 +13,12 @@ private:
 static constexpr size_t LOWER_BOUND_MATCH_INDEX = 1;
 static constexpr size_t UPPER_BOUND_MATCH_INDEX = 2;
 
-    std::vector<std::pair<int, int>> forbidden_ranges;
+    std::vector<std::pair<int, int>> excluded_ranges;
     ConfigOptionEnum<ExcludePrintSpeedsAdjustmentDirection> adjustment_direction;
+
+    static std::vector<std::string> split_user_input_ranges_to_individual_strings(const std::string &_excluded_ranges_user_input);
+    void parse_input(std::vector<std::string> excluded_ranges_strings);
+    void check_input_correctness(const std::vector<std::string> &excluded_ranges_strings);
 
 public:
     ExcludePrintSpeeds(const std::string &_forbidden_ranges_user_input,
