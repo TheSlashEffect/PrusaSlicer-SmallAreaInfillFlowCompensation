@@ -1958,7 +1958,7 @@ void PrintConfigDef::init_fff_params()
         "according to the adjustment direction. One use case for this feature"
         " is to avoid CoreXY kinematic resonances. In its current state, only speeds set by the user in the speed "
         "section will be affected, not speeds set by the minimum layer time. "
-        "Leave empty to disable.");
+        "\nLeave empty to disable.");
     def->mode = comExpert | comPrusa;
     // def->is_vector_extruder = true;
     def->set_default_value(new ConfigOptionString{""});
