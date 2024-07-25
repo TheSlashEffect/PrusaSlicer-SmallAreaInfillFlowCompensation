@@ -815,7 +815,10 @@ float CoolingBuffer::calculate_layer_slowdown(std::vector<PerExtruderAdjustments
         elapsed_time_total0 += adj.elapsed_time_total();
     }
 
-    elapsed_time_total0 = apply_exclude_print_speeds_filter(by_slowdown_time);
+    auto new_elapsed_time = apply_exclude_print_speeds_filter(by_slowdown_time);
+    if (new_elapsed_time != NO_FILTER_APPLIED_RETURN_VALUE) {
+        elapsed_time_total0 = new_elapsed_time;
+    }
     return elapsed_time_total0;
 }
 
@@ -824,7 +827,7 @@ float CoolingBuffer::apply_exclude_print_speeds_filter(
 {
     float elapsed_time = 0.0f;
     if (!exclude_print_speeds_filter) {
-        return 0.0f;
+        return NO_FILTER_APPLIED_RETURN_VALUE;
     }
 
     elapsed_time = 0.0f;
