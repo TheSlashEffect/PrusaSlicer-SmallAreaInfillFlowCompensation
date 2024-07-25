@@ -1476,8 +1476,8 @@ void GCode::_do_export(Print& print_mod, GCodeOutputStream &file, ThumbnailsGene
     try {
         if (!print.config().exclude_print_speed_ranges.empty()) {
             m_exclude_print_speeds =
-                make_unique<ExcludePrintSpeeds>(print.config().exclude_print_speed_ranges,
-                                                print.config().exclude_print_speed_adjustment_direction);
+                std::make_shared<ExcludePrintSpeeds>(print.config().exclude_print_speed_ranges,
+                                                     print.config().exclude_print_speed_adjustment_direction);
         }
     } catch (std::exception &e) {
         throw Slic3r::SlicingError(_(L("Error on excluded print speeds:\n") + _(L(e.what()))));

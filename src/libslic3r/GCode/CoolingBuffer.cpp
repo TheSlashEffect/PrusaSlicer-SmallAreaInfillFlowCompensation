@@ -815,7 +815,35 @@ float CoolingBuffer::calculate_layer_slowdown(std::vector<PerExtruderAdjustments
         elapsed_time_total0 += adj.elapsed_time_total();
     }
 
+    elapsed_time_total0 = apply_exclude_print_speeds_filter(by_slowdown_time);
     return elapsed_time_total0;
+}
+
+float CoolingBuffer::apply_exclude_print_speeds_filter(
+    const std::vector<PerExtruderAdjustments *> &per_extruder_adjustments)
+{
+    float elapsed_time = 0.0f;
+    if (!exclude_print_speeds_filter) {
+        return 0.0f;
+    }
+
+    elapsed_time = 0.0f;
+    for (const auto extruder_adjustment : per_extruder_adjustments) {
+        for (size_t i = 0; i < extruder_adjustment->n_lines_adjustable; i++) {
+            auto *line = &(extruder_adjustment)->lines[i];
+            if (!line->slowdown || line->adjustable(false)) {
+                continue;
+            }
+            double old_feedrate = line->feedrate;
+            double new_feedrate = exclude_print_speeds_filter->adjust_speed_if_in_forbidden_range(old_feedrate);
+            if (new_feedrate != old_feedrate) {
+                line->feedrate = static_cast<float>(new_feedrate);
+                line->time = line->length / line->feedrate;
+            }
+        }
+        elapsed_time += extruder_adjustment->elapsed_time_total();
+    }
+    return elapsed_time;
 }
 
 // list of fan that can be increased (erNone is the default) via fan_below_layer_time and slowdown_below_layer_time
