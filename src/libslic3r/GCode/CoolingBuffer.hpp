@@ -1,6 +1,7 @@
 #ifndef slic3r_CoolingBuffer_hpp_
 #define slic3r_CoolingBuffer_hpp_
 
+#include "ExcludePrintSpeeds.hpp"
 #include "../libslic3r.h"
 #include <map>
 #include <string>
@@ -25,6 +26,10 @@ public:
     CoolingBuffer(GCode &gcodegen);
     void        reset(const Vec3d &position);
     void        set_current_extruder(unsigned int extruder_id) { m_current_extruder = extruder_id; }
+    void        set_exclude_print_speed_filter(std::shared_ptr<ExcludePrintSpeeds> _exclude_print_speeds_filter)
+    {
+        exclude_print_speeds_filter = std::move(_exclude_print_speeds_filter);
+    }
     /// process the layer: check the time and apply fan / speed change
     /// append_time_only: if the layer is only support, then you can put this at true to not process the layer but just append its time to the next one.
     std::string process_layer(std::string &&gcode, size_t layer_id, bool flush, bool append_time_only = false);
@@ -59,6 +64,8 @@ private:
     //saved previous unslowed layer 
     std::map<size_t, float> saved_layer_time_support;
     std::map<size_t, float> saved_layer_time_object;
+
+    std::shared_ptr<ExcludePrintSpeeds> exclude_print_speeds_filter;
 
 
     // Old logic: proportional.

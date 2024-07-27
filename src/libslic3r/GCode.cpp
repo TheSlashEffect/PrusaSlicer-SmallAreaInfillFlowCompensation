@@ -1726,6 +1726,7 @@ void GCode::_do_export(Print& print_mod, GCodeOutputStream &file, ThumbnailsGene
 
     m_cooling_buffer = make_unique<CoolingBuffer>(*this);
     m_cooling_buffer->set_current_extruder(initial_extruder_id);
+    m_cooling_buffer->set_exclude_print_speed_filter(m_exclude_print_speeds);
 
     // Emit machine envelope limits for the Marlin firmware.
     this->print_machine_envelope(file, print);
