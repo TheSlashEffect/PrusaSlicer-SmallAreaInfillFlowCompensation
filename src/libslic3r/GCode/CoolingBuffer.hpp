@@ -29,6 +29,7 @@ public:
     void        set_exclude_print_speed_filter(std::shared_ptr<ExcludePrintSpeeds> _exclude_print_speeds_filter)
     {
         exclude_print_speeds_filter = std::move(_exclude_print_speeds_filter);
+        m_cooling_logic_proportional = exclude_print_speeds_filter ? true : false;
     }
     /// process the layer: check the time and apply fan / speed change
     /// append_time_only: if the layer is only support, then you can put this at true to not process the layer but just append its time to the next one.
@@ -65,7 +66,7 @@ private:
     std::map<size_t, float> saved_layer_time_support;
     std::map<size_t, float> saved_layer_time_object;
 
-    std::shared_ptr<ExcludePrintSpeeds> exclude_print_speeds_filter;
+    std::shared_ptr<ExcludePrintSpeeds> exclude_print_speeds_filter{nullptr};
 
 
     // Old logic: proportional.

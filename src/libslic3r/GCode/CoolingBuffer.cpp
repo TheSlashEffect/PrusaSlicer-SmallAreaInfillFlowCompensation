@@ -832,7 +832,7 @@ float CoolingBuffer::apply_exclude_print_speeds_filter(
 
     elapsed_time = 0.0f;
     for (const auto extruder_adjustment : per_extruder_adjustments) {
-        for (size_t i = 0; i < extruder_adjustment->n_lines_adjustable; i++) {
+        for (size_t i = 0; i < extruder_adjustment->lines.size(); i++) {
             auto *line = &(extruder_adjustment)->lines[i];
             if (!line->slowdown || line->adjustable(false)) {
                 continue;
