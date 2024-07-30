@@ -436,6 +436,46 @@ public:
         }
     }
 
+    float set_calculated_speeds()
+    {
+        float result_time = 0.0f;
+
+        // TODO - CHKA: Assert that the speed we chose for all lines is valid
+        for (auto &elem : *extruder_adjustments) {
+            for (auto &line : elem->lines) {
+                float old_speed = 0.0f;
+                if (!line.adjustable(true)) {
+                    continue;
+                }
+
+                // Reaching this means we have any adjustable extrusion, including external ones
+                line.slowdown = true;
+                old_speed     = line.feedrate;
+                // Non-external only in this branch
+                if (line.adjustable(false)) {
+                    if (adjust_to_min_time) {
+                        line.time     = line.time_max;
+                        line.feedrate = line.length / line.time;
+                    } else {
+                        line.feedrate = target_speed_internal;
+                    }
+                } else { // External extrusion
+                    line.feedrate = target_speed_external;
+                }
+                line.time = line.length / line.feedrate;
+
+                std::cout << "Old speed = " << old_speed << std::endl;
+                std::cout << "New speed = " << line.feedrate << std::endl;
+            }
+            elem->time_total          = elem->elapsed_time_total();
+            elem->time_non_adjustable = elem->non_adjustable_time(true);
+            result_time += elem->time_total;
+            std::cout << "time for extruder: " << elem->time_total << std::endl;
+        }
+
+        return result_time;
+    }
+
     float new_cooldown_algo(float unmodifiable_print_speed_other_extruders)
     {
         calculate_preprocessing_statistics(unmodifiable_print_speed_other_extruders);
@@ -445,37 +485,7 @@ public:
 
         // TODO - Nice code cleanup: Collect indexes of external and internal lines
 
-        float result_time = 0.0f;
-        // TODO - CHKA: Assert that the speed we chose for all lines is valid
-        for (auto &elem : *extruder_adjustments) {
-            for (auto &line : elem->lines) {
-                // External or internal
-                float old_speed = 0.0f;
-                if (line.adjustable(true)) {
-                    line.slowdown = true;
-                    old_speed     = line.feedrate;
-                    // Internal only
-                    if (line.adjustable(false)) {
-                        if (adjust_to_min_time) {
-                            line.time     = line.time_max;
-                            line.feedrate = line.length / line.time;
-                        } else {
-                            line.feedrate = target_speed_internal;
-                        }
-                    } else { // External
-                        line.feedrate = target_speed_external;
-                    }
-                    line.time = line.length / line.feedrate;
-
-                    std::cout << "Old speed = " << old_speed << std::endl;
-                    std::cout << "New speed = " << line.feedrate << std::endl;
-                }
-            }
-            elem->time_total          = elem->elapsed_time_total();
-            elem->time_non_adjustable = elem->non_adjustable_time(true);
-            result_time += elem->time_total;
-            std::cout << "time for extruder: " << elem->time_total << std::endl;
-        }
+        float result_time = set_calculated_speeds();
 
         std::cout << "Target speed internal = " << target_speed_internal << std::endl;
         std::cout << "Target speed external = " << target_speed_external << std::endl;
