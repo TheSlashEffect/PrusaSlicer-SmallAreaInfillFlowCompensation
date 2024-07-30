@@ -336,23 +336,10 @@ public:
         non_external_length       = total_length - external_perimeter_length;
     }
 
-    float new_cooldown_algo(float unmodifiable_print_speed_other_extruders)
+    void print_preprocessing_stats() const
     {
-        float total_time = unmodifiable_print_speed_other_extruders;
-        std::cout << "Starting with total unmodifiable time = " << total_time << std::endl;
-        for (const auto &elem : *extruder_adjustments) {
-            total_time += elem->time_total;
-        }
-
-        calculate_non_external_line_stats();
-        calculate_adjustable_line_stats();
-
-        for (const auto &elem : *extruder_adjustments) {
-            non_adjustable_time += elem->non_adjustable_time(true);
-        }
-
-        std::cout << "               Total time:    " << total_time << "s" << std::endl;
-        std::cout << "          Adjustable time:    " << total_time - non_adjustable_time << "s" << std::endl;
+        std::cout << "               Total time:    " << total_time_before_processing << "s" << std::endl;
+        std::cout << "          Adjustable time:    " << total_time_before_processing - non_adjustable_time << "s" << std::endl;
         std::cout << "      Non-Adjustable time:    " << non_adjustable_time << "s" << std::endl;
         size_t i = 0;
         for (const auto &elem : *extruder_adjustments) {
@@ -372,6 +359,24 @@ public:
         std::cout << std::endl;
         std::cout << std::endl;
         std::cout << std::endl;
+    }
+
+    float new_cooldown_algo(float unmodifiable_print_speed_other_extruders)
+    {
+        total_time_before_processing = unmodifiable_print_speed_other_extruders;
+        std::cout << "Starting with total unmodifiable time = " << total_time_before_processing << std::endl;
+        for (const auto &elem : *extruder_adjustments) {
+            total_time_before_processing += elem->time_total;
+        }
+
+        calculate_non_external_line_stats();
+        calculate_adjustable_line_stats();
+
+        for (const auto &elem : *extruder_adjustments) {
+            non_adjustable_time += elem->non_adjustable_time(true);
+        }
+
+        print_preprocessing_stats();
 
         // TODO - CHKA: Some extruders might not have a minimum layer time. Take that into account
         for (const auto &elem : *extruder_adjustments) {
