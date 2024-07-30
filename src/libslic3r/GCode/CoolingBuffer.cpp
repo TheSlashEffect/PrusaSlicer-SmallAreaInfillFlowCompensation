@@ -325,6 +325,7 @@ public:
         calculate_non_external_line_stats();
         calculate_adjustable_line_stats();
 
+        non_adjustable_time += unmodifiable_print_speed_other_extruders;
         for (const auto &elem : *extruder_adjustments) {
             non_adjustable_time += elem->non_adjustable_time(true);
         }
