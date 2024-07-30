@@ -297,10 +297,11 @@ private:
     // Target statistics and flags
     float target_layer_printable_time = -1.0f;
 
-    float target_speed_all_lines    = 0.0f;
-    float target_speed_external     = 0.0f;
-    float target_speed_non_external = 0.0f;
-    float filtered_speed            = 0.0f;
+    float target_speed_all_lines            = 0.0f;
+    float target_speed_external             = 0.0f;
+    float target_speed_non_external         = 0.0f;
+    float filtered_speed                    = 0.0f;
+    float total_print_time_after_processing = 0.0f;
 
     bool  adjust_to_min_time        = false;
     bool  speed_corrections_needed  = false;
@@ -447,8 +448,7 @@ public:
 
     float set_calculated_speeds()
     {
-        float result_time = 0.0f;
-
+        total_print_time_after_processing = 0.0f;
         // TODO - CHKA: Assert that the speed we chose for all lines is valid
         for (auto &elem : *extruder_adjustments) {
             for (auto &line : elem->lines) {
@@ -474,15 +474,15 @@ public:
             }
             elem->time_total          = elem->elapsed_time_total();
             elem->time_non_adjustable = elem->non_adjustable_time(true);
-            result_time += elem->time_total;
+            total_print_time_after_processing += elem->time_total;
             std::cout << "time for extruder: " << elem->time_total << std::endl;
         }
 
         std::cout << "Target speed non-external = " << target_speed_non_external << std::endl;
         std::cout << "Target speed     external = " << target_speed_external << std::endl;
-        std::cout << "      Achieved layer time = " << result_time << "s" << std::endl;
+        std::cout << "      Achieved layer time = " << total_print_time_after_processing << "s" << std::endl;
 
-        return result_time;
+        return total_print_time_after_processing; // TODO - CHKA: DO NOT RETURN, that's doing 2 things
     }
 
     float new_cooldown_algo(float unmodifiable_print_speed_other_extruders)
