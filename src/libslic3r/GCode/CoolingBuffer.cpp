@@ -475,6 +475,10 @@ public:
             std::cout << "time for extruder: " << elem->time_total << std::endl;
         }
 
+        std::cout << "Target speed internal = " << target_speed_internal << std::endl;
+        std::cout << "Target speed external = " << target_speed_external << std::endl;
+        std::cout << "  Achieved layer time = " << result_time << std::endl;
+
         return result_time;
     }
 
@@ -486,11 +490,6 @@ public:
         perform_speed_corrections_if_needed();
 
         float result_time = set_calculated_speeds();
-
-        std::cout << "Target speed internal = " << target_speed_internal << std::endl;
-        std::cout << "Target speed external = " << target_speed_external << std::endl;
-        std::cout << "  Achieved layer time = " << result_time << std::endl;
-
         return result_time;
     }
 
