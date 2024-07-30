@@ -303,8 +303,8 @@ private:
     float filtered_speed                    = 0.0f;
     float total_print_time_after_processing = 0.0f;
 
-    bool  adjust_to_min_time        = false;
-    bool  speed_corrections_needed  = false;
+    bool  adjust_non_extern_speeds_to_min_time = false;
+    bool  speed_corrections_needed             = false;
 
 public:
     explicit NewCoolingBuffer(std::shared_ptr<ExcludePrintSpeeds>  _exclude_print_speeds_filter,
@@ -435,7 +435,7 @@ public:
             std::cout
                 << "Minimum layer time is reached by external perimeters. Must use min speed on all other extrusions"
                 << std::endl;
-            adjust_to_min_time = true;
+            adjust_non_extern_speeds_to_min_time = true;
         } else {
             float new_non_external_time = target_layer_printable_time - new_external_time;
             std::cout << "Time needed to be covered by non-external lines: " << new_non_external_time << std::endl;
@@ -459,7 +459,7 @@ public:
                 line.slowdown = true;
                 // Non-external only in this branch
                 if (line.adjustable(false)) {
-                    if (adjust_to_min_time) {
+                    if (adjust_non_extern_speeds_to_min_time) {
                         line.time     = line.time_max;
                         line.feedrate = line.length / line.time;
                     } else {
@@ -1022,16 +1022,12 @@ float CoolingBuffer::calculate_layer_slowdown(std::vector<PerExtruderAdjustments
             { return adj1->slowdown_below_layer_time < adj2->slowdown_below_layer_time; });
 
 
-
-    std::vector<PerExtruderAdjustments *> extruders_to_slowdown;
     /*** MY ROUTINE START ***/
 #if 1
     auto new_cooling_buffer = std::make_unique<NewCoolingBuffer>(exclude_print_speeds_filter, &by_slowdown_time);
 
-    float total_unmodifiable_time = 0.0f;
-    float max_requested_layer_time = 0.0f;
-
-    std::vector<size_t> extruder_ids_with_slowdown_time;
+    float total_extrusion_time_from_non_slowdown_extruders = 0.0f;
+    float max_requested_layer_time                         = 0.0f;
 
     size_t extruder_index = 0;
     float total_layer_time = 0.0f;
@@ -1039,10 +1035,9 @@ float CoolingBuffer::calculate_layer_slowdown(std::vector<PerExtruderAdjustments
         extruder_index++;
         std::cout << "Extruder #" << extruder_index << std::endl;
         if (!extruder_adjustments->cooling_slow_down_enabled) {
-            total_unmodifiable_time += extruder_adjustments->elapsed_time_total();
+            total_extrusion_time_from_non_slowdown_extruders += extruder_adjustments->elapsed_time_total();
             continue;
         }
-        extruder_ids_with_slowdown_time.emplace_back(extruder_index);
         std::cout << "Slowdown: " << extruder_adjustments->slowdown_below_layer_time << std::endl;
         max_requested_layer_time = std::max(max_requested_layer_time,
                                             extruder_adjustments->slowdown_below_layer_time);
@@ -1050,15 +1045,15 @@ float CoolingBuffer::calculate_layer_slowdown(std::vector<PerExtruderAdjustments
         total_layer_time += extruder_adjustments->elapsed_time_total();
     }
 
-    float elapsed_time = total_unmodifiable_time;
+    float total_extrusion_time = total_extrusion_time_from_non_slowdown_extruders;
     if (total_layer_time < max_requested_layer_time) {
         std::cout << "Total time is less than max requested layer time: " << total_layer_time << " vs "
                   << max_requested_layer_time << std::endl;
 
-        elapsed_time = new_cooling_buffer->new_cooldown_algo(total_unmodifiable_time);
-        elapsed_time += total_unmodifiable_time;
+        total_extrusion_time = new_cooling_buffer->new_cooldown_algo(total_extrusion_time_from_non_slowdown_extruders);
+        total_extrusion_time += total_extrusion_time_from_non_slowdown_extruders;
     }
-    return elapsed_time;
+    return total_extrusion_time;
 
 #else
     /*** MY ROUTINE END ***/
