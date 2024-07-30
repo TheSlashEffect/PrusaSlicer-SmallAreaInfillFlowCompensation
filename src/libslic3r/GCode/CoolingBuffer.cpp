@@ -486,9 +486,7 @@ public:
     {
         calculate_preprocessing_statistics(unmodifiable_print_speed_other_extruders);
         compute_target_statistics();
-
         perform_speed_corrections_if_needed();
-
         return set_calculated_speeds();
     }
 
