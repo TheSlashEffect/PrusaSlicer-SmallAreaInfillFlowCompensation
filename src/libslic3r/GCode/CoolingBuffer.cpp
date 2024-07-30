@@ -274,7 +274,7 @@ private:
 
     float total_print_time_before_processing = 0.0f;
 
-    float total_adjustable_non_extern_length = 0.0f;
+    float total_adjustable_non_extern_length = 0.0f; // (1)
     float total_adjustable_non_extern_time   = 0.0f;
 
     float all_adjustable_time     = 0.0f;
@@ -285,7 +285,6 @@ private:
     float non_external_perimeter_adjustable_time = 0.0f;
 
     float external_perimeter_length = 0.0f;
-    float non_external_length       = 0.0f;
 
     float non_adjustable_time = 0.0f;
 
@@ -362,7 +361,6 @@ public:
         }
 
         external_perimeter_length = total_adjustable_length - total_adjustable_non_extern_length;
-        non_external_length       = total_length - external_perimeter_length;
     }
 
     void print_preprocessing_stats() const
@@ -383,12 +381,13 @@ public:
         std::cout << "                  Total Length: " << total_length << "mm" << std::endl;
         std::cout << "       Total Adjustable Length: " << total_adjustable_length << "mm" << std::endl;
         std::cout << "    External Adjustable Length: " << external_perimeter_length << "mm" << std::endl;
-        std::cout << "Non-External Adjustable Length: " << non_external_length << "mm" << std::endl;
+        std::cout << "Non-External Adjustable Length: " << total_adjustable_non_extern_length << "mm" << std::endl;
 
         std::cout << std::endl;
         std::cout << std::endl;
         std::cout << std::endl;
     }
+#endif
 
     void compute_target_statistics()
     {
@@ -431,9 +430,9 @@ public:
         } else {
             float new_internal_time = target_layer_printable_time - new_external_time;
             std::cout << "Time needed to be covered by internal lines: " << new_internal_time << std::endl;
-            target_speed_internal = non_external_length / new_internal_time;
+            target_speed_internal = total_adjustable_non_extern_length / new_internal_time;
 
-            std::cout << "Internal perims now take up " << non_external_length;
+            std::cout << "Internal perims now take up " << total_adjustable_non_extern_length;
             std::cout << "mm / " << new_internal_time << "mm/s = " << target_speed_internal << "s" << std::endl;
         }
     }
