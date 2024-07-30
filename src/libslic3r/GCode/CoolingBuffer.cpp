@@ -350,9 +350,7 @@ public:
 
     void calculate_adjustable_line_stats()
     {
-        size_t extruder_count = 0;
         for (const auto &elem : *extruder_adjustments) {
-            extruder_count++;
             for (const auto &line : elem->lines) {
                 if (line.adjustable(true)) {
                     total_adjustable_length += line.length;
@@ -469,7 +467,6 @@ public:
                 }
                 line.time = line.length / line.feedrate;
             }
-            std::cout << "time for extruder: " << elem->time_total << std::endl;
         }
         std::cout << "Target speed non-external = " << target_speed_non_external << std::endl;
         std::cout << "Target speed     external = " << target_speed_external << std::endl;
@@ -479,8 +476,10 @@ public:
 
     void compute_post_process_statistics() {
         total_print_time_after_processing = 0.0f;
+        size_t i = 0;
         for (auto &elem : *extruder_adjustments) {
             elem->time_total          = elem->elapsed_time_total();
+            std::cout << "time for extruder: " << ++i << ": " << elem->time_total << std::endl;
             elem->time_non_adjustable = elem->non_adjustable_time(true);
             total_print_time_after_processing += elem->time_total;
         }
