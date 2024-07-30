@@ -273,12 +273,15 @@ private:
     std::shared_ptr<ExcludePrintSpeeds> exclude_print_speeds_filter{nullptr};
     std::vector<PerExtruderAdjustments* > *extruder_adjustments;
 
+    float unmodifiable_print_speed_other_extruders = 0.0f;
+
+    float total_adjustable_length                  = 0.0f;
     float total_adjustable_non_extern_length       = 0.0f;
     float total_adjustable_extern_perimeter_length = 0.0f;
+
+    float total_adjustable_time                    = 0.0f;
     float total_adjustable_non_extern_time         = 0.0f;
 
-    float total_adjustable_time     = 0.0f;
-    float total_adjustable_length = 0.0f;
     float total_length            = 0.0f; // This is for statistics printouts. Not used in actual algorithm
 
     float total_non_adjustable_time = 0.0f;
@@ -294,12 +297,13 @@ private:
     // Target statistics and flags
     float target_layer_printable_time = -1.0f;
 
-    float target_speed_all_lines   = 0.0f;
-    float target_speed_internal    = 0.0f;
-    float target_speed_external    = 0.0f;
-    float filtered_speed           = 0.0f;
-    bool  adjust_to_min_time       = false;
-    bool  speed_corrections_needed = false;
+    float target_speed_all_lines    = 0.0f;
+    float target_speed_external     = 0.0f;
+    float target_speed_non_external = 0.0f;
+    float filtered_speed            = 0.0f;
+
+    bool  adjust_to_min_time        = false;
+    bool  speed_corrections_needed  = false;
 
 public:
     explicit NewCoolingBuffer(std::shared_ptr<ExcludePrintSpeeds>  _exclude_print_speeds_filter,
@@ -402,7 +406,7 @@ public:
         target_layer_printable_time = target_layer_printable_time - total_non_adjustable_time;
 
         target_speed_all_lines = total_adjustable_length / target_layer_printable_time;
-        target_speed_internal  = target_speed_all_lines;
+        target_speed_non_external  = target_speed_all_lines;
         target_speed_external  = target_speed_all_lines;
 
         filtered_speed = static_cast<float>(
@@ -423,7 +427,7 @@ public:
 
         std::cout << "Illegal speed: " << target_speed_all_lines << std::endl;
         std::cout << "New external speed: " << target_speed_external << std::endl;
-        std::cout << "External perims now take up " << total_adjustable_extern_perimeter_length;
+        std::cout << "    External perims now take up " << total_adjustable_extern_perimeter_length;
         std::cout << "mm / " << target_speed_external << "mm/s = " << new_external_time << "s" << std::endl;
 
         if (new_external_time + total_non_adjustable_time > target_layer_printable_time) {
@@ -434,10 +438,10 @@ public:
         } else {
             float new_internal_time = target_layer_printable_time - new_external_time;
             std::cout << "Time needed to be covered by internal lines: " << new_internal_time << std::endl;
-            target_speed_internal = total_adjustable_non_extern_length / new_internal_time;
+            target_speed_non_external = total_adjustable_non_extern_length / new_internal_time;
 
-            std::cout << "Internal perims now take up " << total_adjustable_non_extern_length;
-            std::cout << "mm / " << new_internal_time << "mm/s = " << target_speed_internal << "s" << std::endl;
+            std::cout << "Non-external perims now take up " << total_adjustable_non_extern_length;
+            std::cout << "mm / " << new_internal_time << "mm/s = " << target_speed_non_external << "s" << std::endl;
         }
     }
 
@@ -460,7 +464,7 @@ public:
                         line.time     = line.time_max;
                         line.feedrate = line.length / line.time;
                     } else {
-                        line.feedrate = target_speed_internal;
+                        line.feedrate = target_speed_non_external;
                     }
                 } else { // External extrusion
                     line.feedrate = target_speed_external;
@@ -474,9 +478,9 @@ public:
             std::cout << "time for extruder: " << elem->time_total << std::endl;
         }
 
-        std::cout << "Target speed internal = " << target_speed_internal << std::endl;
-        std::cout << "Target speed external = " << target_speed_external << std::endl;
-        std::cout << "  Achieved layer time = " << result_time << std::endl;
+        std::cout << "Target speed non-external = " << target_speed_non_external << std::endl;
+        std::cout << "Target speed     external = " << target_speed_external << std::endl;
+        std::cout << "      Achieved layer time = " << result_time << "s" << std::endl;
 
         return result_time;
     }
