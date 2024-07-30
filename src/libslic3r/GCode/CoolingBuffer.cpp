@@ -489,8 +489,7 @@ public:
 
         perform_speed_corrections_if_needed();
 
-        float result_time = set_calculated_speeds();
-        return result_time;
+        return set_calculated_speeds();
     }
 
 };
