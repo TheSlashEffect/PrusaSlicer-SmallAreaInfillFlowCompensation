@@ -299,15 +299,8 @@ public:
         extruder_adjustments        = _extruder_adjustments;
     }
 
-    float new_cooldown_algo(float unmodifiable_print_speed_other_extruders)
+    void calculate_non_external_line_stats()
     {
-        float total_time = unmodifiable_print_speed_other_extruders;
-        std::cout << "Starting with total unmodifiable time = " << total_time << std::endl;
-        for (const auto &elem : *extruder_adjustments) {
-            total_time += elem->time_total;
-        }
-
-        // Calculate non-external perimeter time and length
         for (const auto &elem : *extruder_adjustments) {
             for (const auto &line : elem->lines) {
                 if (line.adjustable(false)) {
@@ -316,8 +309,10 @@ public:
                 }
             }
         }
+    }
 
-        // Calculate all adjustable perimeter time and length
+    void calculate_adjustable_line_stats()
+    {
         size_t extruder_count = 0;
         for (const auto &elem : *extruder_adjustments) {
             extruder_count++;
@@ -330,6 +325,18 @@ public:
             }
             std::cout << "Adjustable length after " << extruder_count << ": " << total_adjustable_length << std::endl;
         }
+    }
+
+    float new_cooldown_algo(float unmodifiable_print_speed_other_extruders)
+    {
+        float total_time = unmodifiable_print_speed_other_extruders;
+        std::cout << "Starting with total unmodifiable time = " << total_time << std::endl;
+        for (const auto &elem : *extruder_adjustments) {
+            total_time += elem->time_total;
+        }
+
+        calculate_non_external_line_stats();
+        calculate_adjustable_line_stats();
 
         external_perimeter_time                = all_adjustable_time - total_adjustable_non_extern_time;
         non_external_perimeter_adjustable_time = 0.0f;
