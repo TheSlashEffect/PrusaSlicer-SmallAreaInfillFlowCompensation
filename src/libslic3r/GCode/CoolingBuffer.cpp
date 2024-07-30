@@ -273,8 +273,6 @@ private:
     std::shared_ptr<ExcludePrintSpeeds> exclude_print_speeds_filter{nullptr};
     std::vector<PerExtruderAdjustments* > *extruder_adjustments;
 
-    float total_print_time_before_processing = 0.0f;
-
     float total_adjustable_non_extern_length = 0.0f;
     float total_adjustable_non_extern_time   = 0.0f;
 
@@ -287,16 +285,17 @@ private:
 
     float non_adjustable_time = 0.0f;
 
-    float target_layer_printable_time = -1.0f;
-
 #if CHKA_DEV_PRINTOUT
-    // Only used in printout
+    // Only used in printouts
+    float total_print_time_before_processing     = 0.0f;
     float external_perimeter_time                = 0.0f;
     float non_external_perimeter_adjustable_time = 0.0f;
 #endif
 
 
     // Target statistics and flags
+    float target_layer_printable_time = -1.0f;
+
     float target_speed_all_lines   = 0.0f;
     float target_speed_internal    = 0.0f;
     float target_speed_external    = 0.0f;
@@ -316,11 +315,13 @@ public:
 
     void calculate_preprocessing_statistics(float unmodifiable_print_speed_other_extruders)
     {
+#if CHKA_DEV_PRINTOUT
         total_print_time_before_processing = unmodifiable_print_speed_other_extruders;
         // std::cout << "Starting with total unmodifiable time = " << total_time_before_processing << std::endl;
         for (const auto &elem : *extruder_adjustments) {
             total_print_time_before_processing += elem->time_total;
         }
+#endif
 
         calculate_non_external_line_stats();
         calculate_adjustable_line_stats();
