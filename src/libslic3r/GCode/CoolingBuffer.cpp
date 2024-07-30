@@ -293,11 +293,12 @@ private:
 
 
     // Target statistics
-    float target_speed_all_lines = 0.0f;
-    float target_speed_internal  = 0.0f;
-    float target_speed_external  = 0.0f;
-    float filtered_speed         = 0.0f;
-    bool  adjust_to_min_time     = false;
+    float target_speed_all_lines   = 0.0f;
+    float target_speed_internal    = 0.0f;
+    float target_speed_external    = 0.0f;
+    float filtered_speed           = 0.0f;
+    bool  adjust_to_min_time       = false;
+    bool  speed_corrections_needed = false;
 
 public:
     explicit NewCoolingBuffer(std::shared_ptr<ExcludePrintSpeeds>  _exclude_print_speeds_filter,
@@ -399,8 +400,40 @@ public:
         target_speed_internal  = target_speed_all_lines;
         target_speed_external  = target_speed_all_lines;
 
-      filtered_speed = static_cast<float>(
-          exclude_print_speeds_filter->adjust_speed_if_in_forbidden_range(target_speed_all_lines));
+        filtered_speed = static_cast<float>(
+            exclude_print_speeds_filter->adjust_speed_if_in_forbidden_range(target_speed_all_lines));
+
+        if (filtered_speed != target_speed_all_lines) {
+            speed_corrections_needed = true;
+        }
+    }
+
+    void perform_speed_corrections_if_needed()
+    {
+        if (!speed_corrections_needed) {
+            return;
+        }
+        target_speed_external   = filtered_speed;
+        float new_external_time = (external_perimeter_length / target_speed_external);
+
+        std::cout << "Illegal speed: " << target_speed_all_lines << std::endl;
+        std::cout << "New external speed: " << target_speed_external << std::endl;
+        std::cout << "External perims now take up " << external_perimeter_length;
+        std::cout << "mm / " << target_speed_external << "mm/s = " << new_external_time << "s" << std::endl;
+
+        if (new_external_time + non_adjustable_time > target_layer_printable_time) {
+            std::cout
+                << "Minimum layer time is reached by external perimeters. Must use min speed on all other extrusions"
+                << std::endl;
+            adjust_to_min_time = true;
+        } else {
+            float new_internal_time = target_layer_printable_time - new_external_time;
+            std::cout << "Time needed to be covered by internal lines: " << new_internal_time << std::endl;
+            target_speed_internal = non_external_length / new_internal_time;
+
+            std::cout << "Internal perims now take up " << non_external_length;
+            std::cout << "mm / " << new_internal_time << "mm/s = " << target_speed_internal << "s" << std::endl;
+        }
     }
 
     float new_cooldown_algo(float unmodifiable_print_speed_other_extruders)
@@ -408,27 +441,7 @@ public:
         calculate_preprocessing_statistics(unmodifiable_print_speed_other_extruders);
         compute_target_statistics();
 
-        if (filtered_speed != target_speed_all_lines) {
-            target_speed_external   = filtered_speed;
-            float new_external_time = (external_perimeter_length / target_speed_external);
-
-            std::cout << "Illegal speed: " << target_speed_all_lines << std::endl;
-            std::cout << "New external speed: " << target_speed_external << std::endl;
-            std::cout << "External perims now take up " << external_perimeter_length;
-            std::cout << " / " << target_speed_external << " = " << new_external_time << "s" << std::endl;
-
-            if (new_external_time + non_adjustable_time > target_layer_printable_time) {
-                std::cout << "We have reached our target! Must use min speed on all other extrusions" << std::endl;
-                adjust_to_min_time = true;
-            } else {
-                float new_internal_time = target_layer_printable_time - new_external_time;
-                std::cout << "Leftover time for internal lines: " << new_internal_time << std::endl;
-                target_speed_internal = non_external_length / new_internal_time;
-
-                std::cout << "Internal perims now take up " << non_external_length;
-                std::cout << " / " << new_internal_time << " = " << target_speed_internal << "s" << std::endl;
-            }
-        }
+        perform_speed_corrections_if_needed();
 
         // TODO - Nice code cleanup: Collect indexes of external and internal lines
 
