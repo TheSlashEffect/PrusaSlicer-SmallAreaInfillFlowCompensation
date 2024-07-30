@@ -1051,7 +1051,6 @@ float CoolingBuffer::calculate_layer_slowdown(std::vector<PerExtruderAdjustments
                   << max_requested_layer_time << std::endl;
 
         total_extrusion_time = new_cooling_buffer->new_cooldown_algo(total_extrusion_time_from_non_slowdown_extruders);
-        total_extrusion_time += total_extrusion_time_from_non_slowdown_extruders;
     }
     return total_extrusion_time;
 
