@@ -446,9 +446,8 @@ public:
         }
     }
 
-    float set_calculated_speeds()
+    void set_calculated_speeds()
     {
-        total_print_time_after_processing = 0.0f;
         // TODO - CHKA: Assert that the speed we chose for all lines is valid
         for (auto &elem : *extruder_adjustments) {
             for (auto &line : elem->lines) {
@@ -470,19 +469,22 @@ public:
                     line.feedrate = target_speed_external;
                 }
                 line.time = line.length / line.feedrate;
-
             }
-            elem->time_total          = elem->elapsed_time_total();
-            elem->time_non_adjustable = elem->non_adjustable_time(true);
-            total_print_time_after_processing += elem->time_total;
             std::cout << "time for extruder: " << elem->time_total << std::endl;
         }
-
         std::cout << "Target speed non-external = " << target_speed_non_external << std::endl;
         std::cout << "Target speed     external = " << target_speed_external << std::endl;
         std::cout << "      Achieved layer time = " << total_print_time_after_processing << "s" << std::endl;
 
-        return total_print_time_after_processing; // TODO - CHKA: DO NOT RETURN, that's doing 2 things
+    }
+
+    void compute_post_process_statistics() {
+        total_print_time_after_processing = 0.0f;
+        for (auto &elem : *extruder_adjustments) {
+            elem->time_total          = elem->elapsed_time_total();
+            elem->time_non_adjustable = elem->non_adjustable_time(true);
+            total_print_time_after_processing += elem->time_total;
+        }
     }
 
     float new_cooldown_algo(float unmodifiable_print_speed_other_extruders)
@@ -490,7 +492,8 @@ public:
         calculate_preprocessing_statistics(unmodifiable_print_speed_other_extruders);
         compute_target_statistics();
         perform_speed_corrections_if_needed();
-        return set_calculated_speeds();
+        set_calculated_speeds();
+        return total_print_time_after_processing;
     }
 
 };
