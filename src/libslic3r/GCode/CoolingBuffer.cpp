@@ -268,27 +268,32 @@ struct PerExtruderAdjustments
 
 class NewCoolingBuffer
 {
+#define CHKA_DEV_PRINTOUT 1
 private:
     std::shared_ptr<ExcludePrintSpeeds> exclude_print_speeds_filter{nullptr};
     std::vector<PerExtruderAdjustments* > *extruder_adjustments;
 
     float total_print_time_before_processing = 0.0f;
 
-    float total_adjustable_non_extern_length = 0.0f; // (1)
+    float total_adjustable_non_extern_length = 0.0f;
     float total_adjustable_non_extern_time   = 0.0f;
 
     float all_adjustable_time     = 0.0f;
     float total_adjustable_length = 0.0f;
     float total_length            = 0.0f; // This is for statistics printouts. Not used in actual algorithm
 
-    float external_perimeter_time                = 0.0f;
-    float non_external_perimeter_adjustable_time = 0.0f;
 
     float external_perimeter_length = 0.0f;
 
     float non_adjustable_time = 0.0f;
 
     float target_layer_printable_time = -1.0f;
+
+#if CHKA_DEV_PRINTOUT
+    // Only used in printout
+    float external_perimeter_time                = 0.0f;
+    float non_external_perimeter_adjustable_time = 0.0f;
+#endif
 
 
     // Target statistics and flags
@@ -324,8 +329,10 @@ public:
             non_adjustable_time += elem->non_adjustable_time(true);
         }
 
+#if CHKA_DEV_PRINTOUT
         print_preprocessing_stats();
     }
+#endif
 
     void calculate_non_external_line_stats()
     {
@@ -363,6 +370,7 @@ public:
         external_perimeter_length = total_adjustable_length - total_adjustable_non_extern_length;
     }
 
+#if CHKA_DEV_PRINTOUT
     void print_preprocessing_stats() const
     {
         std::cout << "               Total time:    " << total_print_time_before_processing << "s" << std::endl;
