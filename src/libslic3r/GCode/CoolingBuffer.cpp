@@ -313,7 +313,6 @@ public:
     {
 #if CHKA_DEV_PRINTOUT
         total_print_time_before_processing = unmodifiable_print_speed_other_extruders;
-        // std::cout << "Starting with total unmodifiable time = " << total_time_before_processing << std::endl;
         for (const auto &elem : *extruder_adjustments) {
             total_print_time_before_processing += elem->time_total;
         }
@@ -356,7 +355,6 @@ public:
                 }
                 total_length += line.length;
             }
-            std::cout << "Adjustable length after " << extruder_count << ": " << total_adjustable_length << std::endl;
         }
 
         external_perimeter_time                = total_adjustable_time - total_adjustable_non_extern_time;
@@ -450,14 +448,12 @@ public:
         // TODO - CHKA: Assert that the speed we chose for all lines is valid
         for (auto &elem : *extruder_adjustments) {
             for (auto &line : elem->lines) {
-                float old_speed = 0.0f;
                 if (!line.adjustable(true)) {
                     continue;
                 }
 
                 // Reaching this means we have any adjustable extrusion, including external ones
                 line.slowdown = true;
-                old_speed     = line.feedrate;
                 // Non-external only in this branch
                 if (line.adjustable(false)) {
                     if (adjust_to_min_time) {
@@ -471,8 +467,6 @@ public:
                 }
                 line.time = line.length / line.feedrate;
 
-                std::cout << "Old speed = " << old_speed << std::endl;
-                std::cout << "New speed = " << line.feedrate << std::endl;
             }
             elem->time_total          = elem->elapsed_time_total();
             elem->time_non_adjustable = elem->non_adjustable_time(true);
