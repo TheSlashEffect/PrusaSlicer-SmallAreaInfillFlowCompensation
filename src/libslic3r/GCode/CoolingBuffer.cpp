@@ -325,6 +325,15 @@ public:
             }
             std::cout << "Adjustable length after " << extruder_count << ": " << total_adjustable_length << std::endl;
         }
+
+        external_perimeter_time                = all_adjustable_time - total_adjustable_non_extern_time;
+        non_external_perimeter_adjustable_time = 0.0f;
+        for (const auto &elem : *extruder_adjustments) {
+            non_external_perimeter_adjustable_time += elem->adjustable_time(false);
+        }
+
+        external_perimeter_length = total_adjustable_length - total_adjustable_non_extern_length;
+        non_external_length       = total_length - external_perimeter_length;
     }
 
     float new_cooldown_algo(float unmodifiable_print_speed_other_extruders)
@@ -337,15 +346,6 @@ public:
 
         calculate_non_external_line_stats();
         calculate_adjustable_line_stats();
-
-        external_perimeter_time                = all_adjustable_time - total_adjustable_non_extern_time;
-        non_external_perimeter_adjustable_time = 0.0f;
-        for (const auto &elem : *extruder_adjustments) {
-            non_external_perimeter_adjustable_time += elem->adjustable_time(false);
-        }
-
-        external_perimeter_length = total_adjustable_length - total_adjustable_non_extern_length;
-        non_external_length       = total_length - external_perimeter_length;
 
         for (const auto &elem : *extruder_adjustments) {
             non_adjustable_time += elem->non_adjustable_time(true);
