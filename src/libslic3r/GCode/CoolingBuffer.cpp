@@ -400,7 +400,6 @@ public:
 
     void compute_target_statistics()
     {
-        // TODO - CHKA: Some extruders might not have a minimum layer time. Take that into account
         for (const auto &elem : *extruder_adjustments) {
             target_layer_printable_time = std::max(target_layer_printable_time, elem->slowdown_below_layer_time);
         }
