@@ -371,6 +371,7 @@ std::string CoolingBuffer::process_layer(std::string &&gcode_in, size_t layer_id
         //compute slowdown
         std::cout << "Calculating slowdown for layer " << layer_id << std::endl;
         float layer_time_stretched = this->calculate_layer_slowdown(per_extruder_adjustments);
+        std::cout << "Time stretched = " << layer_time_stretched << std::endl;
         //compute fans & gcode
         out = this->apply_layer_cooldown(m_gcode, layer_id, layer_time_stretched, per_extruder_adjustments);
         m_gcode.clear();
@@ -760,50 +761,74 @@ static inline void extruder_range_slow_down_non_proportional(
 }
 
 float new_cooldown_algo(std::vector<PerExtruderAdjustments> &extruder_adjustments,
-                        ExcludePrintSpeeds                  *exclude_print_speeds_filter)
+                        ExcludePrintSpeeds                  *exclude_print_speeds_filter,
+                        std::vector<size_t>                  valid_indexes,
+                        float                                unmodifiable_print_speed_other_extruders)
 {
-    float total_time                         = extruder_adjustments[0].time_total;
+    float total_time = unmodifiable_print_speed_other_extruders;
+    std::cout << "Starting with total unmodifiable time = " << total_time << std::endl;
+    for (const auto& elem : extruder_adjustments) {
+        total_time += elem.time_total;
+    }
     float total_adjustable_non_extern_length = 0.0f;
     float total_adjustable_non_extern_time   = 0.0f;
 
     // Calculate non-external perimeter time and length
-    for (auto line : extruder_adjustments[0].lines) {
-        if (line.adjustable(false)) {
-            total_adjustable_non_extern_length += line.length;
-            total_adjustable_non_extern_time += line.time;
+    for (const auto& elem : extruder_adjustments) {
+        for (const auto& line : elem.lines) {
+            if (line.adjustable(false)) {
+                total_adjustable_non_extern_length += line.length;
+                total_adjustable_non_extern_time += line.time;
+            }
         }
     }
 
     float all_adjustable_time   = 0.0f;
-    float all_adjustable_length = 0.0f;
-    float total_length          = 0.0f;
+    float total_adjustable_length = 0.0f;
+    float total_length          = 0.0f; // This is for statistics printouts. Not used in actual algorithm
 
     // Calculate all adjustable perimeter time and length
-    for (auto line : extruder_adjustments[0].lines) {
-        if (line.adjustable(true)) {
-            all_adjustable_length += line.length;
-            all_adjustable_time += line.time;
+    size_t extruder_count = 0;
+    for (const auto& elem : extruder_adjustments) {
+        extruder_count++;
+        for (const auto &line : elem.lines) {
+            if (line.adjustable(true)) {
+                total_adjustable_length += line.length;
+                all_adjustable_time += line.time;
+            }
+            total_length += line.length;
         }
-        total_length += line.length;
+        std::cout << "Adjustable length after " << extruder_count << ": " << total_adjustable_length << std::endl;
     }
 
     float external_perimeter_time                = all_adjustable_time - total_adjustable_non_extern_time;
-    float non_external_perimeter_adjustable_time = extruder_adjustments[0].adjustable_time(false);
+    float non_external_perimeter_adjustable_time = 0.0f;
+    for (const auto& elem : extruder_adjustments) {
+        non_external_perimeter_adjustable_time += elem.adjustable_time(false);
+    }
 
-    float external_perimeter_length = all_adjustable_length - total_adjustable_non_extern_length;
+    float external_perimeter_length = total_adjustable_length - total_adjustable_non_extern_length;
     float non_external_length       = total_length - external_perimeter_length;
 
-    float non_adjustable_time = extruder_adjustments[0].non_adjustable_time(true);
+    float non_adjustable_time = 0.0f;
+    for (const auto& elem : extruder_adjustments) {
+        non_adjustable_time += elem.non_adjustable_time(true);
+    }
 
-    std::cout << "                  Total time: " << total_time << "s" << std::endl;
-    std::cout << "             Adjustable time: " << total_time - non_adjustable_time << "s" << std::endl;
-    std::cout << "         Non-Adjustable time: " << non_adjustable_time << "s" << std::endl;
+    std::cout << "               Total time:    " << total_time << "s" << std::endl;
+    std::cout << "          Adjustable time:    " << total_time - non_adjustable_time << "s" << std::endl;
+    std::cout << "      Non-Adjustable time:    " << non_adjustable_time << "s" << std::endl;
+    size_t i = 0;
+    for (const auto& elem : extruder_adjustments) {
+        i++;
+        std::cout << "      Non-Adjustable time[" << i << "]: " << elem.non_adjustable_time(true) << "s" << std::endl;
+    }
     std::cout << "    External-Adjustable time: " << external_perimeter_time << "s" << std::endl;
     std::cout << "Non-External Adjustable time: " << non_external_perimeter_adjustable_time << "s" << std::endl;
 
     std::cout << std::endl;
     std::cout << "                  Total Length: " << total_length << "mm" << std::endl;
-    std::cout << "       Total Adjustable Length: " << all_adjustable_length << "mm" << std::endl;
+    std::cout << "       Total Adjustable Length: " << total_adjustable_length << "mm" << std::endl;
     std::cout << "    External Adjustable Length: " << external_perimeter_length << "mm" << std::endl;
     std::cout << "Non-External Adjustable Length: " << non_external_length << "mm" << std::endl;
 
@@ -811,10 +836,14 @@ float new_cooldown_algo(std::vector<PerExtruderAdjustments> &extruder_adjustment
     std::cout << std::endl;
     std::cout << std::endl;
 
-    float target_layer_time = extruder_adjustments[0].slowdown_below_layer_time;
+    // TODO - CHKA: Some extruders might not have a minimum layer time. Take that into account
+    float target_layer_printable_time = -1.0f;
+    for (const auto& elem : extruder_adjustments) {
+        target_layer_printable_time = std::max(target_layer_printable_time, elem.slowdown_below_layer_time);
+    }
+    target_layer_printable_time = target_layer_printable_time - non_adjustable_time;
 
-    float                  result_time            = 0.0f;
-    float                  target_speed_all_lines = total_length / target_layer_time;
+    float                  target_speed_all_lines = total_adjustable_length / target_layer_printable_time;
     float                  target_speed_internal  = target_speed_all_lines;
     float                  target_speed_external  = target_speed_all_lines;
     static constexpr float ADJUST_TO_MIN_TIME     = -1.0f;
@@ -830,11 +859,11 @@ float new_cooldown_algo(std::vector<PerExtruderAdjustments> &extruder_adjustment
         std::cout << "External perims now take up " << external_perimeter_length;
         std::cout << " / " << target_speed_external << " = " << new_external_time << "s" << std::endl;
 
-        if (new_external_time + non_adjustable_time > target_layer_time) {
+        if (new_external_time + non_adjustable_time > target_layer_printable_time) {
             std::cout << "We have reached our target! Must use min speed on all other extrusions" << std::endl;
             target_speed_internal = ADJUST_TO_MIN_TIME;
         } else {
-            float new_internal_time = target_layer_time - new_external_time;
+            float new_internal_time = target_layer_printable_time - new_external_time;
             std::cout << "Leftover time for internal lines: " << new_internal_time << std::endl;
             target_speed_internal = non_external_length / new_internal_time;
             std::cout << "new  internal speed = " << target_speed_internal << std::endl;
@@ -843,33 +872,41 @@ float new_cooldown_algo(std::vector<PerExtruderAdjustments> &extruder_adjustment
 
     // TODO - Nice code cleanup: Collect indexes of external and internal lines
 
+    float result_time = 0.0f;
     // TODO - CHKA: Assert that the speed we chose for all lines is valid
-    for (auto &line : extruder_adjustments[0].lines) {
-        // External or internal
-        float old_speed = 0.0f;
-        if (line.adjustable(true)) {
-            line.slowdown = true;
-            // Internal only
-            old_speed = line.feedrate;
-            if (line.adjustable(false)) {
-                if (target_speed_internal == ADJUST_TO_MIN_TIME) {
-                    line.time     = line.time_max;
-                    line.feedrate = line.length / line.time;
-                } else {
-                    line.feedrate = target_speed_internal;
+    for (auto& elem : extruder_adjustments) {
+        for (auto &line : elem.lines) {
+            // External or internal
+            float old_speed = 0.0f;
+            if (line.adjustable(true)) {
+                line.slowdown = true;
+                old_speed     = line.feedrate;
+                // Internal only
+                if (line.adjustable(false)) {
+                    if (target_speed_internal == ADJUST_TO_MIN_TIME) {
+                        line.time     = line.time_max;
+                        line.feedrate = line.length / line.time;
+                    } else {
+                        line.feedrate = target_speed_internal;
+                    }
+                } else { // External
+                    line.feedrate = target_speed_external;
                 }
-            } else { // External
-                line.feedrate = target_speed_external;
+                line.time = line.length / line.feedrate;
+
+                std::cout << "Old speed = " << old_speed << std::endl;
+                std::cout << "New speed = " << line.feedrate << std::endl;
             }
-            line.time = line.length / line.feedrate;
-            std::cout << "Old speed = " << old_speed << std::endl;
-            std::cout << "New speed = " << line.feedrate << std::endl;
         }
-        result_time += line.time;
+        elem.time_total = elem.elapsed_time_total();
+        elem.time_non_adjustable = elem.non_adjustable_time(true);
+        result_time += elem.time_total;
+        std::cout << "time for extruder: " << elem.time_total << std::endl;
     }
 
     std::cout << "Target speed internal = " << target_speed_internal << std::endl;
     std::cout << "Target speed external = " << target_speed_external << std::endl;
+    std::cout << "  Achieved layer time = " << result_time << std::endl;
 
     return result_time;
 }
@@ -908,27 +945,37 @@ float CoolingBuffer::calculate_layer_slowdown(std::vector<PerExtruderAdjustments
     std::vector<PerExtruderAdjustments *> extruders_to_slowdown;
     /*** MY ROUTINE START ***/
 #if 1
-    float total_time = 0.0f;
-    size_t extruder_count = 0;
+    float total_unmodifiable_time = 0.0f;
     float max_requested_layer_time = 0.0f;
+
+    std::vector<size_t> extruder_ids_with_slowdown_time;
+
+    size_t extruder_index = 0;
+    float total_layer_time = 0.0f;
     for (const auto extruder_adjustments : by_slowdown_time) {
-        extruder_count++;
-        std::cout << "Extruder #" << extruder_count << std::endl;
+        extruder_index++;
+        std::cout << "Extruder #" << extruder_index << std::endl;
+        if (!extruder_adjustments->cooling_slow_down_enabled) {
+            total_unmodifiable_time += extruder_adjustments->elapsed_time_total();
+            continue;
+        }
+        extruder_ids_with_slowdown_time.emplace_back(extruder_index);
         std::cout << "Slowdown: " << extruder_adjustments->slowdown_below_layer_time << std::endl;
-
-        total_time += extruder_adjustments->elapsed_time_total();
-        max_requested_layer_time = std::max(max_requested_layer_time, extruder_adjustments->slowdown_below_layer_time);
-
+        max_requested_layer_time = std::max(max_requested_layer_time,
+                                            extruder_adjustments->slowdown_below_layer_time);
         std::cout << "Print time: " << extruder_adjustments->elapsed_time_total() << std::endl;
+        total_layer_time += extruder_adjustments->elapsed_time_total();
     }
 
-    if (total_time < max_requested_layer_time) {
-        std::cout << "Total time is less than max requested layer time: " << total_time << " vs "
+    float elapsed_time = total_unmodifiable_time;
+    if (total_layer_time < max_requested_layer_time) {
+        std::cout << "Total time is less than max requested layer time: " << total_layer_time << " vs "
                   << max_requested_layer_time << std::endl;
 
-        new_cooldown_algo(per_extruder_adjustments, exclude_print_speeds_filter.get());
+        elapsed_time = new_cooldown_algo(per_extruder_adjustments, exclude_print_speeds_filter.get(),
+                                         extruder_ids_with_slowdown_time, total_unmodifiable_time);
     }
-    return 1.1f;
+    return elapsed_time;
 
 #else
     /*** MY ROUTINE END ***/
