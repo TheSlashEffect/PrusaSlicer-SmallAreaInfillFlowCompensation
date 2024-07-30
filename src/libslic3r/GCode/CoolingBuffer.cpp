@@ -1044,6 +1044,7 @@ float CoolingBuffer::calculate_layer_slowdown(std::vector<PerExtruderAdjustments
                   << max_requested_layer_time << std::endl;
 
         elapsed_time = new_cooling_buffer->new_cooldown_algo(total_unmodifiable_time);
+        elapsed_time += total_unmodifiable_time;
     }
     return elapsed_time;
 
