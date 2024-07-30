@@ -291,6 +291,14 @@ private:
 
     float target_layer_printable_time = -1.0f;
 
+
+    // Target statistics
+    float target_speed_all_lines = 0.0f;
+    float target_speed_internal  = 0.0f;
+    float target_speed_external  = 0.0f;
+    float filtered_speed         = 0.0f;
+    bool  adjust_to_min_time     = false;
+
 public:
     explicit NewCoolingBuffer(std::shared_ptr<ExcludePrintSpeeds>  _exclude_print_speeds_filter,
                               std::vector<PerExtruderAdjustments*> *_extruder_adjustments)
@@ -361,6 +369,22 @@ public:
         std::cout << std::endl;
     }
 
+    void compute_target_statistics()
+    {
+        // TODO - CHKA: Some extruders might not have a minimum layer time. Take that into account
+        for (const auto &elem : *extruder_adjustments) {
+            target_layer_printable_time = std::max(target_layer_printable_time, elem->slowdown_below_layer_time);
+        }
+        target_layer_printable_time = target_layer_printable_time - non_adjustable_time;
+
+      target_speed_all_lines = total_adjustable_length / target_layer_printable_time;
+      target_speed_internal  = target_speed_all_lines;
+      target_speed_external  = target_speed_all_lines;
+
+      filtered_speed = static_cast<float>(
+          exclude_print_speeds_filter->adjust_speed_if_in_forbidden_range(target_speed_all_lines));
+    }
+
     float new_cooldown_algo(float unmodifiable_print_speed_other_extruders)
     {
         total_time_before_processing = unmodifiable_print_speed_other_extruders;
@@ -378,19 +402,8 @@ public:
 
         print_preprocessing_stats();
 
-        // TODO - CHKA: Some extruders might not have a minimum layer time. Take that into account
-        for (const auto &elem : *extruder_adjustments) {
-            target_layer_printable_time = std::max(target_layer_printable_time, elem->slowdown_below_layer_time);
-        }
-        target_layer_printable_time = target_layer_printable_time - non_adjustable_time;
+        compute_target_statistics();
 
-        float                  target_speed_all_lines = total_adjustable_length / target_layer_printable_time;
-        float                  target_speed_internal  = target_speed_all_lines;
-        float                  target_speed_external  = target_speed_all_lines;
-        static constexpr float ADJUST_TO_MIN_TIME     = -1.0f;
-
-        auto filtered_speed = static_cast<float>(
-            exclude_print_speeds_filter->adjust_speed_if_in_forbidden_range(target_speed_all_lines));
         if (filtered_speed != target_speed_all_lines) {
             target_speed_external   = filtered_speed;
             float new_external_time = (external_perimeter_length / target_speed_external);
@@ -402,7 +415,7 @@ public:
 
             if (new_external_time + non_adjustable_time > target_layer_printable_time) {
                 std::cout << "We have reached our target! Must use min speed on all other extrusions" << std::endl;
-                target_speed_internal = ADJUST_TO_MIN_TIME;
+                adjust_to_min_time = true;
             } else {
                 float new_internal_time = target_layer_printable_time - new_external_time;
                 std::cout << "Leftover time for internal lines: " << new_internal_time << std::endl;
@@ -426,7 +439,7 @@ public:
                     old_speed     = line.feedrate;
                     // Internal only
                     if (line.adjustable(false)) {
-                        if (target_speed_internal == ADJUST_TO_MIN_TIME) {
+                        if (adjust_to_min_time) {
                             line.time     = line.time_max;
                             line.feedrate = line.length / line.time;
                         } else {
