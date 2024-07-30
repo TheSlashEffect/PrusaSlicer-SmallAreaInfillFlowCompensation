@@ -307,6 +307,24 @@ public:
         extruder_adjustments        = _extruder_adjustments;
     }
 
+    void calculate_preprocessing_statistics(float unmodifiable_print_speed_other_extruders)
+    {
+        total_time_before_processing = unmodifiable_print_speed_other_extruders;
+        // std::cout << "Starting with total unmodifiable time = " << total_time_before_processing << std::endl;
+        for (const auto &elem : *extruder_adjustments) {
+            total_time_before_processing += elem->time_total;
+        }
+
+        calculate_non_external_line_stats();
+        calculate_adjustable_line_stats();
+
+        for (const auto &elem : *extruder_adjustments) {
+            non_adjustable_time += elem->non_adjustable_time(true);
+        }
+
+        print_preprocessing_stats();
+    }
+
     void calculate_non_external_line_stats()
     {
         for (const auto &elem : *extruder_adjustments) {
@@ -387,21 +405,7 @@ public:
 
     float new_cooldown_algo(float unmodifiable_print_speed_other_extruders)
     {
-        total_time_before_processing = unmodifiable_print_speed_other_extruders;
-        std::cout << "Starting with total unmodifiable time = " << total_time_before_processing << std::endl;
-        for (const auto &elem : *extruder_adjustments) {
-            total_time_before_processing += elem->time_total;
-        }
-
-        calculate_non_external_line_stats();
-        calculate_adjustable_line_stats();
-
-        for (const auto &elem : *extruder_adjustments) {
-            non_adjustable_time += elem->non_adjustable_time(true);
-        }
-
-        print_preprocessing_stats();
-
+        calculate_preprocessing_statistics(unmodifiable_print_speed_other_extruders);
         compute_target_statistics();
 
         if (filtered_speed != target_speed_all_lines) {
