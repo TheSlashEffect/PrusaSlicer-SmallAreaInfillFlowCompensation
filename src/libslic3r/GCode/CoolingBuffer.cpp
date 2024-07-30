@@ -270,6 +270,7 @@ class NewCoolingBuffer
 {
 private:
     std::shared_ptr<ExcludePrintSpeeds> exclude_print_speeds_filter{nullptr};
+    // std::vector<PerExtruderAdjustments* > *extruder_adjustments;
 
     float total_time_before_processing = 0.0f;
 
@@ -279,6 +280,16 @@ private:
     float all_adjustable_time     = 0.0f;
     float total_adjustable_length = 0.0f;
     float total_length            = 0.0f; // This is for statistics printouts. Not used in actual algorithm
+
+    float external_perimeter_time                = 0.0f;
+    float non_external_perimeter_adjustable_time = 0.0f;
+
+    float external_perimeter_length = 0.0f;
+    float non_external_length       = 0.0f;
+
+    float non_adjustable_time = 0.0f;
+
+    float target_layer_printable_time = -1.0f;
 
 public:
     explicit NewCoolingBuffer(std::shared_ptr<ExcludePrintSpeeds> _exclude_print_speeds_filter)
@@ -292,8 +303,6 @@ public:
         float total_time = unmodifiable_print_speed_other_extruders;
         std::cout << "Starting with total unmodifiable time = " << total_time << std::endl;
         for (const auto &elem : extruder_adjustments) { total_time += elem.time_total; }
-        float total_adjustable_non_extern_length = 0.0f;
-        float total_adjustable_non_extern_time   = 0.0f;
 
         // Calculate non-external perimeter time and length
         for (const auto &elem : extruder_adjustments) {
@@ -304,10 +313,6 @@ public:
                 }
             }
         }
-
-        float all_adjustable_time     = 0.0f;
-        float total_adjustable_length = 0.0f;
-        float total_length            = 0.0f; // This is for statistics printouts. Not used in actual algorithm
 
         // Calculate all adjustable perimeter time and length
         size_t extruder_count = 0;
@@ -323,16 +328,15 @@ public:
             std::cout << "Adjustable length after " << extruder_count << ": " << total_adjustable_length << std::endl;
         }
 
-        float external_perimeter_time                = all_adjustable_time - total_adjustable_non_extern_time;
-        float non_external_perimeter_adjustable_time = 0.0f;
+        external_perimeter_time                = all_adjustable_time - total_adjustable_non_extern_time;
+        non_external_perimeter_adjustable_time = 0.0f;
         for (const auto &elem : extruder_adjustments) {
             non_external_perimeter_adjustable_time += elem.adjustable_time(false);
         }
 
-        float external_perimeter_length = total_adjustable_length - total_adjustable_non_extern_length;
-        float non_external_length       = total_length - external_perimeter_length;
+        external_perimeter_length = total_adjustable_length - total_adjustable_non_extern_length;
+        non_external_length       = total_length - external_perimeter_length;
 
-        float non_adjustable_time = 0.0f;
         for (const auto &elem : extruder_adjustments) { non_adjustable_time += elem.non_adjustable_time(true); }
 
         std::cout << "               Total time:    " << total_time << "s" << std::endl;
@@ -358,7 +362,6 @@ public:
         std::cout << std::endl;
 
         // TODO - CHKA: Some extruders might not have a minimum layer time. Take that into account
-        float target_layer_printable_time = -1.0f;
         for (const auto &elem : extruder_adjustments) {
             target_layer_printable_time = std::max(target_layer_printable_time, elem.slowdown_below_layer_time);
         }
