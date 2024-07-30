@@ -273,17 +273,15 @@ private:
     std::shared_ptr<ExcludePrintSpeeds> exclude_print_speeds_filter{nullptr};
     std::vector<PerExtruderAdjustments* > *extruder_adjustments;
 
-    float total_adjustable_non_extern_length = 0.0f;
-    float total_adjustable_non_extern_time   = 0.0f;
+    float total_adjustable_non_extern_length       = 0.0f;
+    float total_adjustable_extern_perimeter_length = 0.0f;
+    float total_adjustable_non_extern_time         = 0.0f;
 
-    float all_adjustable_time     = 0.0f;
+    float total_adjustable_time     = 0.0f;
     float total_adjustable_length = 0.0f;
     float total_length            = 0.0f; // This is for statistics printouts. Not used in actual algorithm
 
-
-    float external_perimeter_length = 0.0f;
-
-    float non_adjustable_time = 0.0f;
+    float total_non_adjustable_time = 0.0f;
 
 #if CHKA_DEV_PRINTOUT
     // Only used in printouts
@@ -326,9 +324,9 @@ public:
         calculate_non_external_line_stats();
         calculate_adjustable_line_stats();
 
-        non_adjustable_time += unmodifiable_print_speed_other_extruders;
+        total_non_adjustable_time += unmodifiable_print_speed_other_extruders;
         for (const auto &elem : *extruder_adjustments) {
-            non_adjustable_time += elem->non_adjustable_time(true);
+            total_non_adjustable_time += elem->non_adjustable_time(true);
         }
 
 #if CHKA_DEV_PRINTOUT
@@ -356,28 +354,28 @@ public:
             for (const auto &line : elem->lines) {
                 if (line.adjustable(true)) {
                     total_adjustable_length += line.length;
-                    all_adjustable_time += line.time;
+                    total_adjustable_time += line.time;
                 }
                 total_length += line.length;
             }
             std::cout << "Adjustable length after " << extruder_count << ": " << total_adjustable_length << std::endl;
         }
 
-        external_perimeter_time                = all_adjustable_time - total_adjustable_non_extern_time;
+        external_perimeter_time                = total_adjustable_time - total_adjustable_non_extern_time;
         non_external_perimeter_adjustable_time = 0.0f;
         for (const auto &elem : *extruder_adjustments) {
             non_external_perimeter_adjustable_time += elem->adjustable_time(false);
         }
 
-        external_perimeter_length = total_adjustable_length - total_adjustable_non_extern_length;
+        total_adjustable_extern_perimeter_length = total_adjustable_length - total_adjustable_non_extern_length;
     }
 
 #if CHKA_DEV_PRINTOUT
     void print_preprocessing_stats() const
     {
         std::cout << "               Total time:    " << total_print_time_before_processing << "s" << std::endl;
-        std::cout << "          Adjustable time:    " << total_print_time_before_processing - non_adjustable_time << "s" << std::endl;
-        std::cout << "      Non-Adjustable time:    " << non_adjustable_time << "s" << std::endl;
+        std::cout << "          Adjustable time:    " << total_print_time_before_processing - total_non_adjustable_time << "s" << std::endl;
+        std::cout << "      Non-Adjustable time:    " << total_non_adjustable_time << "s" << std::endl;
         size_t i = 0;
         for (const auto &elem : *extruder_adjustments) {
             i++;
@@ -390,7 +388,7 @@ public:
         std::cout << std::endl;
         std::cout << "                  Total Length: " << total_length << "mm" << std::endl;
         std::cout << "       Total Adjustable Length: " << total_adjustable_length << "mm" << std::endl;
-        std::cout << "    External Adjustable Length: " << external_perimeter_length << "mm" << std::endl;
+        std::cout << "    External Adjustable Length: " << total_adjustable_extern_perimeter_length << "mm" << std::endl;
         std::cout << "Non-External Adjustable Length: " << total_adjustable_non_extern_length << "mm" << std::endl;
 
         std::cout << std::endl;
@@ -405,7 +403,7 @@ public:
         for (const auto &elem : *extruder_adjustments) {
             target_layer_printable_time = std::max(target_layer_printable_time, elem->slowdown_below_layer_time);
         }
-        target_layer_printable_time = target_layer_printable_time - non_adjustable_time;
+        target_layer_printable_time = target_layer_printable_time - total_non_adjustable_time;
 
         target_speed_all_lines = total_adjustable_length / target_layer_printable_time;
         target_speed_internal  = target_speed_all_lines;
@@ -425,14 +423,14 @@ public:
             return;
         }
         target_speed_external   = filtered_speed;
-        float new_external_time = (external_perimeter_length / target_speed_external);
+        float new_external_time = (total_adjustable_extern_perimeter_length / target_speed_external);
 
         std::cout << "Illegal speed: " << target_speed_all_lines << std::endl;
         std::cout << "New external speed: " << target_speed_external << std::endl;
-        std::cout << "External perims now take up " << external_perimeter_length;
+        std::cout << "External perims now take up " << total_adjustable_extern_perimeter_length;
         std::cout << "mm / " << target_speed_external << "mm/s = " << new_external_time << "s" << std::endl;
 
-        if (new_external_time + non_adjustable_time > target_layer_printable_time) {
+        if (new_external_time + total_non_adjustable_time > target_layer_printable_time) {
             std::cout
                 << "Minimum layer time is reached by external perimeters. Must use min speed on all other extrusions"
                 << std::endl;
