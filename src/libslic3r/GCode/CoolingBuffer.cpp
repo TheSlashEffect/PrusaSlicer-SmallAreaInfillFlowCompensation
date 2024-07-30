@@ -390,7 +390,9 @@ public:
                 float new_internal_time = target_layer_printable_time - new_external_time;
                 std::cout << "Leftover time for internal lines: " << new_internal_time << std::endl;
                 target_speed_internal = non_external_length / new_internal_time;
-                std::cout << "new  internal speed = " << target_speed_internal << std::endl;
+
+                std::cout << "Internal perims now take up " << non_external_length;
+                std::cout << " / " << new_internal_time << " = " << target_speed_internal << "s" << std::endl;
             }
         }
 
