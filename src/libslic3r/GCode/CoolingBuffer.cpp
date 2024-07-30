@@ -300,6 +300,8 @@ private:
     bool  adjust_to_min_time       = false;
     bool  speed_corrections_needed = false;
 
+    // TODO - Nice code cleanup: Collect indexes of external and internal lines
+
 public:
     explicit NewCoolingBuffer(std::shared_ptr<ExcludePrintSpeeds>  _exclude_print_speeds_filter,
                               std::vector<PerExtruderAdjustments*> *_extruder_adjustments)
@@ -482,8 +484,6 @@ public:
         compute_target_statistics();
 
         perform_speed_corrections_if_needed();
-
-        // TODO - Nice code cleanup: Collect indexes of external and internal lines
 
         float result_time = set_calculated_speeds();
 
