@@ -436,12 +436,12 @@ public:
                 << std::endl;
             adjust_to_min_time = true;
         } else {
-            float new_internal_time = target_layer_printable_time - new_external_time;
-            std::cout << "Time needed to be covered by internal lines: " << new_internal_time << std::endl;
-            target_speed_non_external = total_adjustable_non_extern_length / new_internal_time;
+            float new_non_external_time = target_layer_printable_time - new_external_time;
+            std::cout << "Time needed to be covered by non-external lines: " << new_non_external_time << std::endl;
+            target_speed_non_external = total_adjustable_non_extern_length / new_non_external_time;
 
             std::cout << "Non-external perims now take up " << total_adjustable_non_extern_length;
-            std::cout << "mm / " << new_internal_time << "mm/s = " << target_speed_non_external << "s" << std::endl;
+            std::cout << "mm / " << new_non_external_time << "mm/s = " << target_speed_non_external << "s" << std::endl;
         }
     }
 
