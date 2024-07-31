@@ -349,9 +349,9 @@ public:
         }
         target_layer_printable_time = target_layer_printable_time - total_non_adjustable_time;
 
-        target_speed_all_lines = total_adjustable_length / target_layer_printable_time;
-        target_speed_non_external  = target_speed_all_lines;
-        target_speed_external  = target_speed_all_lines;
+        target_speed_all_lines    = total_adjustable_length / target_layer_printable_time;
+        target_speed_non_external = target_speed_all_lines;
+        target_speed_external     = target_speed_all_lines;
 
         filtered_speed = static_cast<float>(
             exclude_print_speeds_filter->adjust_speed_if_in_forbidden_range(target_speed_all_lines));
