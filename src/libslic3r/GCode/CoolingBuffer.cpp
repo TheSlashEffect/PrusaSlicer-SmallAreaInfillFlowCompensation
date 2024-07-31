@@ -443,29 +443,48 @@ public:
         }
     }
 
+    // TODO - CHKA: Avoid increasing any speeds on potential lines but at the same time
+    //  stay as close to the desired layer time as possible, to not increase the print time. Need to change target statistic
+    //  computation algorithm. Although suboptimal at the moment, the cases where one does not reach the minimum
+    //  layer times would be in layers with not too many extrusions, and the user should not have too many of these
+    //  layers to make this offset too significant.
+    void set_new_feedrate_and_time(CoolingLine &line) const {
+        if (!line.adjustable(true)) {
+            return;
+        }
+
+        float new_feedrate = 0.0f;
+        // All adjustable lines, external and non-external
+        if (line.adjustable(false)) {
+            if (adjust_non_extern_speeds_to_min_time) {
+                // This branch is safe, we can set these speeds and return
+                line.time     = line.time_max;
+                line.feedrate = line.length / line.time;
+                line.slowdown = true;
+                return;
+            }
+            new_feedrate = target_speed_non_external;
+        } else { // External only
+            new_feedrate = target_speed_external;
+        }
+
+        if (new_feedrate > line.feedrate) {
+            std::cout << "Attempting illegal speed increase!" << std::endl;
+            std::cout << "From " << line.feedrate << " to " << new_feedrate << std::endl;
+            return;
+        }
+
+        line.feedrate = new_feedrate;
+        line.time     = line.length / line.feedrate;
+        line.slowdown = true;
+    }
+
     void set_calculated_speeds()
     {
         // TODO - CHKA: Assert that the speed we chose for all lines is valid
         for (auto &elem : *extruder_adjustments) {
             for (auto &line : elem->lines) {
-                if (!line.adjustable(true)) {
-                    continue;
-                }
-
-                // Reaching this means we have any adjustable extrusion, including external ones
-                line.slowdown = true;
-                // Non-external only in this branch
-                if (line.adjustable(false)) {
-                    if (adjust_non_extern_speeds_to_min_time) {
-                        line.time     = line.time_max;
-                        line.feedrate = line.length / line.time;
-                    } else {
-                        line.feedrate = target_speed_non_external;
-                    }
-                } else { // External extrusion
-                    line.feedrate = target_speed_external;
-                }
-                line.time = line.length / line.feedrate;
+                set_new_feedrate_and_time(line);
             }
         }
 
