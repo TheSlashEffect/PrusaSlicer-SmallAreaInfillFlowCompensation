@@ -543,9 +543,7 @@ std::string CoolingBuffer::process_layer(std::string &&gcode_in, size_t layer_id
             }
         }
         //compute slowdown
-        std::cout << "Calculating slowdown for layer " << layer_id << std::endl;
         float layer_time_stretched = this->calculate_layer_slowdown(per_extruder_adjustments);
-        std::cout << "Time stretched = " << layer_time_stretched << std::endl;
         //compute fans & gcode
         out = this->apply_layer_cooldown(m_gcode, layer_id, layer_time_stretched, per_extruder_adjustments);
         m_gcode.clear();
