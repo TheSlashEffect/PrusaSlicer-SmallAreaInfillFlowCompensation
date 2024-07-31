@@ -468,6 +468,8 @@ public:
                 line.time = line.length / line.feedrate;
             }
         }
+
+        compute_post_process_statistics();
         std::cout << "Target speed non-external = " << target_speed_non_external << std::endl;
         std::cout << "Target speed     external = " << target_speed_external << std::endl;
         std::cout << "      Achieved layer time = " << total_print_time_after_processing << "s" << std::endl;
