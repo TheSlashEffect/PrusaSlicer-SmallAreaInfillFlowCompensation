@@ -481,7 +481,6 @@ public:
 
     void set_calculated_speeds()
     {
-        // TODO - CHKA: Assert that the speed we chose for all lines is valid
         for (auto &elem : *extruder_adjustments) {
             for (auto &line : elem->lines) {
                 set_new_feedrate_and_time(line);
