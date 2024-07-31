@@ -1025,10 +1025,6 @@ float CoolingBuffer::calculate_layer_slowdown(std::vector<PerExtruderAdjustments
         elapsed_time_total0 += adj.elapsed_time_total();
     }
 
-    auto new_elapsed_time = apply_exclude_print_speeds_filter(by_slowdown_time);
-    if (new_elapsed_time != NO_FILTER_APPLIED_RETURN_VALUE) {
-        elapsed_time_total0 = new_elapsed_time;
-    }
     return elapsed_time_total0;
 #endif
 }
