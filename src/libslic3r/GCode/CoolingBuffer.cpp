@@ -387,7 +387,6 @@ public:
         }
 
         float new_feedrate = 0.0f;
-        // All adjustable lines, external and non-external
         if (line.adjustable(false)) {
             if (adjust_non_extern_speeds_to_min_time) {
                 // This branch is safe, we can set these speeds and return
@@ -430,7 +429,7 @@ public:
         }
     }
 
-    float new_cooldown_algo(float unmodifiable_print_speed_other_extruders)
+    float slowdown_to_minimum_layer_time(float unmodifiable_print_speed_other_extruders)
     {
         calculate_preprocessing_statistics(unmodifiable_print_speed_other_extruders);
         compute_target_statistics();
@@ -993,7 +992,7 @@ float CoolingBuffer::calculate_layer_slowdown(std::vector<PerExtruderAdjustments
         std::cout << "Total time is less than max requested layer time: " << total_layer_time << " vs "
                   << max_requested_layer_time << std::endl;
 
-        total_extrusion_time = new_cooling_buffer->new_cooldown_algo(total_extrusion_time_from_non_slowdown_extruders);
+        total_extrusion_time = new_cooling_buffer->slowdown_to_minimum_layer_time(total_extrusion_time_from_non_slowdown_extruders);
     }
     return total_extrusion_time;
 
