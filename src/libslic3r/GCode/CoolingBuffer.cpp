@@ -971,27 +971,19 @@ float CoolingBuffer::calculate_layer_slowdown(std::vector<PerExtruderAdjustments
     float total_extrusion_time_from_non_slowdown_extruders = 0.0f;
     float max_requested_layer_time                         = 0.0f;
 
-    size_t extruder_index = 0;
     float total_layer_time = 0.0f;
     for (const auto extruder_adjustments : by_slowdown_time) {
-        extruder_index++;
-        std::cout << "Extruder #" << extruder_index << std::endl;
         if (!extruder_adjustments->cooling_slow_down_enabled) {
             total_extrusion_time_from_non_slowdown_extruders += extruder_adjustments->elapsed_time_total();
             continue;
         }
-        std::cout << "Slowdown: " << extruder_adjustments->slowdown_below_layer_time << std::endl;
         max_requested_layer_time = std::max(max_requested_layer_time,
                                             extruder_adjustments->slowdown_below_layer_time);
-        std::cout << "Print time: " << extruder_adjustments->elapsed_time_total() << std::endl;
         total_layer_time += extruder_adjustments->elapsed_time_total();
     }
 
     float total_extrusion_time = total_extrusion_time_from_non_slowdown_extruders;
     if (total_layer_time < max_requested_layer_time) {
-        std::cout << "Total time is less than max requested layer time: " << total_layer_time << " vs "
-                  << max_requested_layer_time << std::endl;
-
         total_extrusion_time = new_cooling_buffer->slowdown_to_minimum_layer_time(total_extrusion_time_from_non_slowdown_extruders);
     }
     return total_extrusion_time;
