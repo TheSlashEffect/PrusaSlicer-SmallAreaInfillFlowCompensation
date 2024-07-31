@@ -1953,25 +1953,29 @@ void PrintConfigDef::init_fff_params()
     def = this->add("exclude_print_speed_ranges", coString);
     def->label = L("Excluded speed ranges (in mm/s)");
     def->tooltip = L(
-        "Speed ranges to be excluded. Example input form: 30-40, 60-80. "
-        "If any speeds fall in these ranges, they will be raised/lowered "
-        "according to the adjustment direction. One use case for this feature"
-        " is to avoid CoreXY kinematic resonances. In its current state, only speeds set by the user in the speed "
-        "section will be affected, not speeds set by the minimum layer time. "
+        "Print speed ranges to be excluded. Example input form: 30-40, 60-80. "
+        "\nIf any speeds fall in these ranges, they will be raised/lowered "
+        "according to the \"Adjustment direction\" option. One use case for this feature "
+        "is to avoid CoreXY kinematic resonances. "
+        "\nIn its current state, minimum layer times might be "
+        "slightly higher than the time set."
         "\nLeave empty to disable.");
     def->mode = comExpert | comSuSi;
     // def->is_vector_extruder = true;
     def->set_default_value(new ConfigOptionString{""});
 
+    // TODO - CHKA: If users wish for this, we can have one adjustment direction option for the user set speeds,
+    //  and one option for the ones set by the minimum layer time.
     def = this->add("exclude_print_speed_adjustment_direction", coEnum);
     def->label = L("Adjustment direction");
     def->full_label = L("Exclude print speed adjustment direction");
     def->category = OptionCategory::speed;
-    def->tooltip = L("This option decides which direction to adjust any invalid print speeds."
-//        "\n * None: Warn the user that print speeds in the invalid region are in effect, but do not alter them." // TODO - CHKA
+    def->tooltip = L("This option decides which direction to adjust any print speeds set by the user or "
+                     "computed by the minimum layer time which fall in any of the excluded ranges."
+//        "\n * None: Warn the user that print speeds in the invalid region are in effect, but do not alter them." // TODO - CHKA ?
         "\n * Lowest:  drop the speed to the lowest value of the range."
         "\n * Highest: raise the speed to the highest value of the range."
-        "\n * Nearest: change the speed to whichever value of the above is closest to the speed set.");
+        "\n * Nearest: change the speed to whichever value of the above is closest to the original or computed speed.");
     def->enum_keys_map = &ConfigOptionEnum<ExcludePrintSpeedsAdjustmentDirection>::get_enum_values();
 //    def->enum_values.push_back("none");
     def->enum_values.emplace_back("lowest");
