@@ -289,7 +289,7 @@ private:
     float target_speed_all_lines            = 0.0f;
     float target_speed_external             = 0.0f;
     float target_speed_non_external         = 0.0f;
-    float filtered_speed_all_lines          = 0.0f;
+    float target_filtered_speed_all_lines   = 0.0f;
     float total_print_time_after_processing = 0.0f;
 
     bool  adjust_non_extern_speeds_to_min_time  = false;
@@ -367,10 +367,10 @@ public:
         target_speed_non_external = target_speed_all_lines;
         target_speed_external     = target_speed_all_lines;
 
-        filtered_speed_all_lines = static_cast<float>(
+        target_filtered_speed_all_lines = static_cast<float>(
             exclude_print_speeds_filter->adjust_speed_if_in_forbidden_range(target_speed_all_lines));
 
-        if (filtered_speed_all_lines != target_speed_all_lines) {
+        if (target_filtered_speed_all_lines != target_speed_all_lines) {
             non_external_speed_corrections_needed = true;
         }
         non_external_speed_adjustment_needed = true;
@@ -378,7 +378,7 @@ public:
 
     void compute_external_speed()
     {
-        target_speed_external = filtered_speed_all_lines;
+        target_speed_external = target_filtered_speed_all_lines;
         // This speed comes from the user set, already filtered external perimeter speeds
         float valid_external_speed = determine_valid_external_speed(target_speed_external);
         if (valid_external_speed != target_speed_external) {
