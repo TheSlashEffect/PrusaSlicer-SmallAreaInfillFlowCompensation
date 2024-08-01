@@ -999,13 +999,6 @@ float CoolingBuffer::calculate_layer_slowdown(std::vector<PerExtruderAdjustments
         [](const PerExtruderAdjustments *adj1, const PerExtruderAdjustments *adj2)
             { return adj1->slowdown_below_layer_time < adj2->slowdown_below_layer_time; });
 
-    std::cout << "chka46: layer times: " << std::endl;
-    for (auto elem : by_slowdown_time) {
-        std::cout << elem->slowdown_below_layer_time << std::endl;
-    }
-
-
-    size_t extruder_count = 0;
     for (auto cur_begin = by_slowdown_time.begin(); cur_begin != by_slowdown_time.end(); ++ cur_begin) {
         PerExtruderAdjustments &adj = *(*cur_begin);
         // Calculate the current adjusted elapsed_time_total over the non-finalized extruders.
