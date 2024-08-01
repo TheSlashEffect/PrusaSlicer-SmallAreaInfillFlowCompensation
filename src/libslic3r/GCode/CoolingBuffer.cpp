@@ -367,6 +367,14 @@ public:
             speed_corrections_needed = true;
         }
         non_external_adjustment_needed = true;
+
+        target_speed_external = filtered_speed;
+        // This speed comes from the user set and already filtered external perimeter speeds
+        float valid_external_speed = determine_valid_external_speed(target_speed_external);
+        if (valid_external_speed != target_speed_external) {
+            target_speed_external = valid_external_speed;
+            speed_corrections_needed = true;
+        }
     }
 
     void perform_speed_corrections_if_needed()
@@ -374,7 +382,6 @@ public:
         if (!speed_corrections_needed) {
             return;
         }
-        target_speed_external   = filtered_speed;
         float new_external_time = (total_adjustable_extern_perimeter_length / target_speed_external);
         if (new_external_time + total_non_adjustable_time > target_layer_printable_time) {
             adjust_non_extern_speeds_to_min_time = true;
@@ -386,6 +393,19 @@ public:
                 non_external_adjustment_needed = false;
             }
         }
+    }
+
+    [[nodiscard]] float determine_valid_external_speed(float new_desired_speed) const
+    {
+        float min_speed = new_desired_speed;
+        for (const auto &extruder_adjustment : *extruder_adjustments) {
+            for (const auto line : extruder_adjustment->lines) {
+                if (line.adjustable(true) && !line.adjustable(false)) {
+                    min_speed = std::min(new_desired_speed, line.feedrate);
+                }
+            }
+        }
+        return min_speed;
     }
 
     // TODO - CHKA: Avoid increasing any speeds on potential lines but at the same time
