@@ -425,7 +425,8 @@ public:
     //  stay as close to the desired layer time as possible, to not increase the print time. Need to change target statistic
     //  computation algorithm. Although suboptimal at the moment, the cases where one does not reach the minimum
     //  layer times would be in layers with not too many extrusions, and the user should not have too many of these
-    //  layers to make this offset too significant.
+    //  layers to make this offset too significant. I believe this is covered fully in d5315cb27553483f4381905bdc1a647ec72a85b6.
+    //  must double-check.
     void set_new_feedrate_and_time(CoolingLine &line) const {
         if (!line.adjustable(true)) {
             return;
