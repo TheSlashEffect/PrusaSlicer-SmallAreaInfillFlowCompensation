@@ -970,6 +970,10 @@ float CoolingBuffer::calculate_layer_slowdown_exclude_print_speeds(
 // Calculate slow down for all the extruders.
 float CoolingBuffer::calculate_layer_slowdown(std::vector<PerExtruderAdjustments> &per_extruder_adjustments)
 {
+    if (exclude_print_speeds_filter) {
+        return calculate_layer_slowdown_exclude_print_speeds(per_extruder_adjustments);
+    }
+
     // Sort the extruders by an increasing slowdown_below_layer_time.
     // The layers with a lower slowdown_below_layer_time are slowed down
     // together with all the other layers with slowdown_below_layer_time above.
@@ -994,13 +998,6 @@ float CoolingBuffer::calculate_layer_slowdown(std::vector<PerExtruderAdjustments
     std::sort(by_slowdown_time.begin(), by_slowdown_time.end(),
         [](const PerExtruderAdjustments *adj1, const PerExtruderAdjustments *adj2)
             { return adj1->slowdown_below_layer_time < adj2->slowdown_below_layer_time; });
-
-
-    /*** MY ROUTINE START ***/
-#if 1
-    return calculate_layer_slowdown_exclude_print_speeds(per_extruder_adjustments);
-#else
-    /*** MY ROUTINE END ***/
 
     std::cout << "chka46: layer times: " << std::endl;
     for (auto elem : by_slowdown_time) {
@@ -1039,7 +1036,6 @@ float CoolingBuffer::calculate_layer_slowdown(std::vector<PerExtruderAdjustments
     }
 
     return elapsed_time_total0;
-#endif
 }
 
 float CoolingBuffer::apply_exclude_print_speeds_filter(
