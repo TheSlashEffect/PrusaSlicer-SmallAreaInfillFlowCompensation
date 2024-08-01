@@ -352,7 +352,8 @@ public:
     {
         compute_target_layer_printable_time();
         compute_target_speeds();
-        correct_external_speed();
+        compute_external_speed();
+        perform_non_external_speed_corrections_if_needed();
     }
 
     void compute_target_layer_printable_time()
@@ -379,7 +380,7 @@ public:
         non_external_speed_adjustment_needed = true;
     }
 
-    void correct_external_speed()
+    void compute_external_speed()
     {
         target_speed_external = filtered_speed_all_lines;
         // This speed comes from the user set, already filtered external perimeter speeds
@@ -480,7 +481,6 @@ public:
     {
         calculate_preprocessing_statistics(unmodifiable_print_speed_other_extruders);
         compute_target_statistics();
-        perform_non_external_speed_corrections_if_needed();
         set_calculated_speeds();
         compute_post_process_statistics();
         return total_print_time_after_processing;
