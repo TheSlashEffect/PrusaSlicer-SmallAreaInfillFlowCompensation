@@ -280,10 +280,7 @@ private:
 
     float total_adjustable_time                    = 0.0f;
     float total_adjustable_non_extern_time         = 0.0f;
-
-    float total_length            = 0.0f; // This is for statistics printouts. Not used in actual algorithm
-
-    float total_non_adjustable_time = 0.0f;
+    float total_non_adjustable_time                = 0.0f;
 
     static constexpr float MAX_INVALID_TARGET_LAYER_PRINTABLE_TIME = std::numeric_limits<float>::min();
     // Target statistics and flags
@@ -334,7 +331,6 @@ public:
                     total_adjustable_length += line.length;
                     total_adjustable_time += line.time;
                 }
-                total_length += line.length;
             }
         }
         total_adjustable_extern_perimeter_length = total_adjustable_length - total_adjustable_non_extern_length;
