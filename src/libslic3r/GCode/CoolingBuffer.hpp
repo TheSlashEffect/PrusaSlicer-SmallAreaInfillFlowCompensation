@@ -69,7 +69,7 @@ private:
 
 
     // Old logic: proportional.
-    bool                   m_cooling_logic_proportional   = false;
+    bool m_cooling_logic_proportional = false;
 };
 
 }
