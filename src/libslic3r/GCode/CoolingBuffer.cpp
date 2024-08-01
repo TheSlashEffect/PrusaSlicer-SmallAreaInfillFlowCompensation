@@ -297,6 +297,7 @@ private:
 
     bool  adjust_non_extern_speeds_to_min_time = false;
     bool  speed_corrections_needed             = false;
+    bool  non_external_adjustment_needed       = false;
 
 public:
     explicit NewCoolingBuffer(std::shared_ptr<ExcludePrintSpeeds>  _exclude_print_speeds_filter,
@@ -372,13 +373,18 @@ public:
         if (!speed_corrections_needed) {
             return;
         }
-        target_speed_external   = filtered_speed;
+        target_speed_external          = filtered_speed;
+        non_external_adjustment_needed = true;
         float new_external_time = (total_adjustable_extern_perimeter_length / target_speed_external);
         if (new_external_time + total_non_adjustable_time > target_layer_printable_time) {
             adjust_non_extern_speeds_to_min_time = true;
         } else {
-            float new_non_external_time = target_layer_printable_time - new_external_time;
+            float extern_and_non_adjustable_time_sum = new_external_time + total_non_adjustable_time;
+            float new_non_external_time = target_layer_printable_time - extern_and_non_adjustable_time_sum;
             target_speed_non_external = total_adjustable_non_extern_length / new_non_external_time;
+            if (total_adjustable_non_extern_time > new_non_external_time) {
+                non_external_adjustment_needed = false;
+            }
         }
     }
 
@@ -394,6 +400,9 @@ public:
 
         float new_feedrate = 0.0f;
         if (line.adjustable(false)) {
+            if (!non_external_adjustment_needed) {
+                return;
+            }
             if (adjust_non_extern_speeds_to_min_time) {
                 // This branch is safe, we can set these speeds and return
                 line.time     = line.time_max;
@@ -955,7 +964,7 @@ float CoolingBuffer::calculate_layer_slowdown_exclude_print_speeds(
     }
 
     if (min_requested_layer_time != NO_MINIMUM_REQUESTED_LAYER_TIME_SET &&
-        total_layer_time >= min_requested_layer_time) {
+        total_layer_time > min_requested_layer_time) {
         return total_layer_time;
     }
 
