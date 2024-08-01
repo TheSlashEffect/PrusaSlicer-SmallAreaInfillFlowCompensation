@@ -309,11 +309,7 @@ public:
     {
         calculate_non_external_line_stats();
         calculate_adjustable_line_stats();
-
-        total_non_adjustable_time += unmodifiable_print_speed_other_extruders;
-        for (const auto &elem : *extruder_adjustments) {
-            total_non_adjustable_time += elem->non_adjustable_time(true);
-        }
+        calculate_non_adjustable_time_stats();
     }
 
     void calculate_non_external_line_stats()
@@ -340,6 +336,14 @@ public:
             }
         }
         total_adjustable_extern_perimeter_length = total_adjustable_length - total_adjustable_non_extern_length;
+    }
+
+    void calculate_non_adjustable_time_stats()
+    {
+        total_non_adjustable_time += unmodifiable_print_speed_other_extruders;
+        for (const auto &elem : *extruder_adjustments) {
+            total_non_adjustable_time += elem->non_adjustable_time(true);
+        }
     }
 
     void compute_target_statistics()
