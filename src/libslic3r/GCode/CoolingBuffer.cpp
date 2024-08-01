@@ -285,8 +285,9 @@ private:
 
     float total_non_adjustable_time = 0.0f;
 
+    static constexpr float MAX_INVALID_TARGET_LAYER_PRINTABLE_TIME = std::numeric_limits<float>::max();
     // Target statistics and flags
-    float target_layer_printable_time = -1.0f;
+    float target_layer_printable_time = MAX_INVALID_TARGET_LAYER_PRINTABLE_TIME;
 
     float target_speed_all_lines            = 0.0f;
     float target_speed_external             = 0.0f;
@@ -349,8 +350,9 @@ public:
     void compute_target_statistics()
     {
         for (const auto &elem : *extruder_adjustments) {
-            target_layer_printable_time = std::max(target_layer_printable_time, elem->slowdown_below_layer_time);
+            target_layer_printable_time = std::min(target_layer_printable_time, elem->slowdown_below_layer_time);
         }
+        assert(target_layer_printable_time != MAX_INVALID_TARGET_LAYER_PRINTABLE_TIME);
         target_layer_printable_time = target_layer_printable_time - total_non_adjustable_time;
 
         target_speed_all_lines    = total_adjustable_length / target_layer_printable_time;
@@ -938,7 +940,7 @@ static inline void extruder_range_slow_down_non_proportional(
 float CoolingBuffer::calculate_layer_slowdown_exclude_print_speeds(
     std::vector<PerExtruderAdjustments> &per_extruder_adjustments)
 {
-    static constexpr float NO_MINIMUM_REQUESTED_LAYER_TIME_SET              = -1.0f;
+    static constexpr float NO_MINIMUM_REQUESTED_LAYER_TIME_SET              = std::numeric_limits<float>::max();
     float                  total_extrusion_time_from_non_slowdown_extruders = 0.0f;
     float                  min_requested_layer_time                         = NO_MINIMUM_REQUESTED_LAYER_TIME_SET;
 
