@@ -368,8 +368,13 @@ public:
         }
         non_external_adjustment_needed = true;
 
+        correct_external_speed();
+    }
+
+    void correct_external_speed()
+    {
         target_speed_external = filtered_speed;
-        // This speed comes from the user set and already filtered external perimeter speeds
+        // This speed comes from the user set, already filtered external perimeter speeds
         float valid_external_speed = determine_valid_external_speed(target_speed_external);
         if (valid_external_speed != target_speed_external) {
             target_speed_external = valid_external_speed;
