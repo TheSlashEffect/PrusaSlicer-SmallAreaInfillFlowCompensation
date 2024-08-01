@@ -350,11 +350,7 @@ public:
 
     void compute_target_statistics()
     {
-        for (const auto &elem : *extruder_adjustments) {
-            target_layer_printable_time = std::max(target_layer_printable_time, elem->slowdown_below_layer_time);
-        }
-        assert(target_layer_printable_time != MAX_INVALID_TARGET_LAYER_PRINTABLE_TIME);
-        target_layer_printable_time = target_layer_printable_time - total_non_adjustable_time;
+        compute_target_layer_printable_time();
 
         target_speed_all_lines    = total_adjustable_length / target_layer_printable_time;
         target_speed_non_external = target_speed_all_lines;
@@ -369,6 +365,15 @@ public:
         non_external_speed_adjustment_needed = true;
 
         correct_external_speed();
+    }
+
+    void compute_target_layer_printable_time()
+    {
+        for (const auto &elem : *extruder_adjustments) {
+            target_layer_printable_time = std::max(target_layer_printable_time, elem->slowdown_below_layer_time);
+        }
+        assert(target_layer_printable_time != MAX_INVALID_TARGET_LAYER_PRINTABLE_TIME);
+        target_layer_printable_time = target_layer_printable_time - total_non_adjustable_time;
     }
 
     void correct_external_speed()
