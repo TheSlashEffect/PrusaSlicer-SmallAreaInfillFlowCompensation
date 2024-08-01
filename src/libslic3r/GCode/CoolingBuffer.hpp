@@ -70,7 +70,6 @@ private:
 
     // Old logic: proportional.
     bool                   m_cooling_logic_proportional   = false;
-    static constexpr float NO_FILTER_APPLIED_RETURN_VALUE = -1.0f;
 };
 
 }
