@@ -285,7 +285,7 @@ private:
 
     float total_non_adjustable_time = 0.0f;
 
-    static constexpr float MAX_INVALID_TARGET_LAYER_PRINTABLE_TIME = std::numeric_limits<float>::max();
+    static constexpr float MAX_INVALID_TARGET_LAYER_PRINTABLE_TIME = std::numeric_limits<float>::min();
     // Target statistics and flags
     float target_layer_printable_time = MAX_INVALID_TARGET_LAYER_PRINTABLE_TIME;
 
@@ -351,7 +351,7 @@ public:
     void compute_target_statistics()
     {
         for (const auto &elem : *extruder_adjustments) {
-            target_layer_printable_time = std::min(target_layer_printable_time, elem->slowdown_below_layer_time);
+            target_layer_printable_time = std::max(target_layer_printable_time, elem->slowdown_below_layer_time);
         }
         assert(target_layer_printable_time != MAX_INVALID_TARGET_LAYER_PRINTABLE_TIME);
         target_layer_printable_time = target_layer_printable_time - total_non_adjustable_time;
@@ -969,7 +969,7 @@ static inline void extruder_range_slow_down_non_proportional(
 float CoolingBuffer::calculate_layer_slowdown_exclude_print_speeds(
     std::vector<PerExtruderAdjustments> &per_extruder_adjustments)
 {
-    static constexpr float NO_MINIMUM_REQUESTED_LAYER_TIME_SET              = std::numeric_limits<float>::max();
+    static constexpr float NO_MINIMUM_REQUESTED_LAYER_TIME_SET              = std::numeric_limits<float>::min();
     float                  total_extrusion_time_from_non_slowdown_extruders = 0.0f;
     float                  min_requested_layer_time                         = NO_MINIMUM_REQUESTED_LAYER_TIME_SET;
 
@@ -979,7 +979,7 @@ float CoolingBuffer::calculate_layer_slowdown_exclude_print_speeds(
             total_extrusion_time_from_non_slowdown_extruders += extruder_adjustments.elapsed_time_total();
             continue;
         }
-        min_requested_layer_time = std::min(min_requested_layer_time, extruder_adjustments.slowdown_below_layer_time);
+        min_requested_layer_time = std::max(min_requested_layer_time, extruder_adjustments.slowdown_below_layer_time);
         total_layer_time += extruder_adjustments.elapsed_time_total();
     }
 
