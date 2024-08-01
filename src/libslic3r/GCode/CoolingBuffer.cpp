@@ -938,16 +938,6 @@ static inline void extruder_range_slow_down_non_proportional(
 float CoolingBuffer::calculate_layer_slowdown_exclude_print_speeds(
     std::vector<PerExtruderAdjustments> &per_extruder_adjustments)
 {
-    std::vector<PerExtruderAdjustments*> extruders_to_adjust;
-    for (PerExtruderAdjustments &adj : per_extruder_adjustments) {
-        adj.time_total  = adj.elapsed_time_total();
-        if (adj.cooling_slow_down_enabled && !adj.lines.empty()) {
-            extruders_to_adjust.emplace_back(&adj);
-        }
-    }
-
-    auto new_cooling_buffer = std::make_unique<NewCoolingBuffer>(exclude_print_speeds_filter, &extruders_to_adjust);
-
     float total_extrusion_time_from_non_slowdown_extruders = 0.0f;
     float max_requested_layer_time                         = 0.0f;
 
@@ -961,10 +951,20 @@ float CoolingBuffer::calculate_layer_slowdown_exclude_print_speeds(
         total_layer_time += extruder_adjustments.elapsed_time_total();
     }
 
-    if (total_layer_time < max_requested_layer_time) {
-        total_layer_time = new_cooling_buffer->slowdown_to_minimum_layer_time(
-            total_extrusion_time_from_non_slowdown_extruders);
+    if (total_layer_time >= max_requested_layer_time) {
+        return total_layer_time;
     }
+
+    std::vector<PerExtruderAdjustments *> extruders_to_adjust;
+    for (PerExtruderAdjustments &adj : per_extruder_adjustments) {
+        adj.time_total = adj.elapsed_time_total();
+        if (adj.cooling_slow_down_enabled && !adj.lines.empty()) {
+            extruders_to_adjust.emplace_back(&adj);
+        }
+    }
+    auto new_cooling_buffer = std::make_unique<NewCoolingBuffer>(exclude_print_speeds_filter, &extruders_to_adjust);
+    total_layer_time        = new_cooling_buffer->slowdown_to_minimum_layer_time(
+        total_extrusion_time_from_non_slowdown_extruders);
     return total_layer_time;
 }
 
