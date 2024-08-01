@@ -292,12 +292,12 @@ private:
     float target_speed_all_lines            = 0.0f;
     float target_speed_external             = 0.0f;
     float target_speed_non_external         = 0.0f;
-    float filtered_speed                    = 0.0f;
+    float filtered_speed_all_lines          = 0.0f;
     float total_print_time_after_processing = 0.0f;
 
-    bool  adjust_non_extern_speeds_to_min_time = false;
-    bool  speed_corrections_needed             = false;
-    bool  non_external_adjustment_needed       = false;
+    bool  adjust_non_extern_speeds_to_min_time  = false;
+    bool  non_external_speed_corrections_needed = false;
+    bool  non_external_speed_adjustment_needed  = false;
 
 public:
     explicit NewCoolingBuffer(std::shared_ptr<ExcludePrintSpeeds>  _exclude_print_speeds_filter,
@@ -360,31 +360,31 @@ public:
         target_speed_non_external = target_speed_all_lines;
         target_speed_external     = target_speed_all_lines;
 
-        filtered_speed = static_cast<float>(
+        filtered_speed_all_lines = static_cast<float>(
             exclude_print_speeds_filter->adjust_speed_if_in_forbidden_range(target_speed_all_lines));
 
-        if (filtered_speed != target_speed_all_lines) {
-            speed_corrections_needed = true;
+        if (filtered_speed_all_lines != target_speed_all_lines) {
+            non_external_speed_corrections_needed = true;
         }
-        non_external_adjustment_needed = true;
+        non_external_speed_adjustment_needed = true;
 
         correct_external_speed();
     }
 
     void correct_external_speed()
     {
-        target_speed_external = filtered_speed;
+        target_speed_external = filtered_speed_all_lines;
         // This speed comes from the user set, already filtered external perimeter speeds
         float valid_external_speed = determine_valid_external_speed(target_speed_external);
         if (valid_external_speed != target_speed_external) {
             target_speed_external = valid_external_speed;
-            speed_corrections_needed = true;
+            non_external_speed_corrections_needed = true;
         }
     }
 
-    void perform_speed_corrections_if_needed()
+    void perform_non_external_speed_corrections_if_needed()
     {
-        if (!speed_corrections_needed) {
+        if (!non_external_speed_corrections_needed) {
             return;
         }
         float new_external_time = (total_adjustable_extern_perimeter_length / target_speed_external);
@@ -395,7 +395,7 @@ public:
             float new_non_external_time = target_layer_printable_time - extern_and_non_adjustable_time_sum;
             target_speed_non_external = total_adjustable_non_extern_length / new_non_external_time;
             if (total_adjustable_non_extern_time > new_non_external_time) {
-                non_external_adjustment_needed = false;
+                non_external_speed_adjustment_needed = false;
             }
         }
     }
@@ -425,7 +425,7 @@ public:
 
         float new_feedrate = 0.0f;
         if (line.adjustable(false)) {
-            if (!non_external_adjustment_needed) {
+            if (!non_external_speed_adjustment_needed) {
                 return;
             }
             if (adjust_non_extern_speeds_to_min_time) {
@@ -471,7 +471,7 @@ public:
     {
         calculate_preprocessing_statistics(unmodifiable_print_speed_other_extruders);
         compute_target_statistics();
-        perform_speed_corrections_if_needed();
+        perform_non_external_speed_corrections_if_needed();
         set_calculated_speeds();
         compute_post_process_statistics();
         return total_print_time_after_processing;
