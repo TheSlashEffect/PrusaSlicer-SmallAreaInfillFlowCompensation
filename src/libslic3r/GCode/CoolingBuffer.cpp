@@ -366,6 +366,7 @@ public:
         if (filtered_speed != target_speed_all_lines) {
             speed_corrections_needed = true;
         }
+        non_external_adjustment_needed = true;
     }
 
     void perform_speed_corrections_if_needed()
@@ -373,8 +374,7 @@ public:
         if (!speed_corrections_needed) {
             return;
         }
-        target_speed_external          = filtered_speed;
-        non_external_adjustment_needed = true;
+        target_speed_external   = filtered_speed;
         float new_external_time = (total_adjustable_extern_perimeter_length / target_speed_external);
         if (new_external_time + total_non_adjustable_time > target_layer_printable_time) {
             adjust_non_extern_speeds_to_min_time = true;
