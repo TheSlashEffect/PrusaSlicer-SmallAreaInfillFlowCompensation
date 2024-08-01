@@ -421,7 +421,7 @@ public:
     }
 
     void compute_post_process_statistics() {
-        total_print_time_after_processing = 0.0f;
+        total_print_time_after_processing = total_non_adjustable_time;
         for (auto &elem : *extruder_adjustments) {
             elem->time_total          = elem->elapsed_time_total();
             elem->time_non_adjustable = elem->non_adjustable_time(true);
@@ -958,12 +958,11 @@ float CoolingBuffer::calculate_layer_slowdown_exclude_print_speeds(
         total_layer_time += extruder_adjustments.elapsed_time_total();
     }
 
-    float total_extrusion_time = total_extrusion_time_from_non_slowdown_extruders;
     if (total_layer_time < max_requested_layer_time) {
-        total_extrusion_time = new_cooling_buffer->slowdown_to_minimum_layer_time(
+        total_layer_time = new_cooling_buffer->slowdown_to_minimum_layer_time(
             total_extrusion_time_from_non_slowdown_extruders);
-    } // TODO - CHKA: If time is greater than minimum layer time, we are not returning the correct print time.
-    return total_extrusion_time;
+    }
+    return total_layer_time;
 }
 
 
