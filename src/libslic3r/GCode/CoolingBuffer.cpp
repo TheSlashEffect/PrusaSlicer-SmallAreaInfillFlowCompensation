@@ -420,8 +420,6 @@ public:
                 set_new_feedrate_and_time(line);
             }
         }
-
-        compute_post_process_statistics();
     }
 
     void compute_post_process_statistics() {
@@ -439,6 +437,7 @@ public:
         compute_target_statistics();
         perform_speed_corrections_if_needed();
         set_calculated_speeds();
+        compute_post_process_statistics();
         return total_print_time_after_processing;
     }
 
