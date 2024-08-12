@@ -1,12 +1,12 @@
+///|/ Copyright (c) Prusa Research 2016 - 2023 Vojtěch Bubník @bubnikv, Lukáš Matěna @lukasmatena, Lukáš Hejl @hejllukas, Enrico Turri @enricoturri1966
+///|/ Copyright (c) Slic3r 2013 - 2016 Alessandro Ranellucci @alranel
+///|/
+///|/ PrusaSlicer is released under the terms of the AGPLv3 or higher
+///|/
 #include "MultiPoint.hpp"
 #include "BoundingBox.hpp"
 
 namespace Slic3r {
-
-MultiPoint::operator Points() const
-{
-    return this->points;
-}
 
 void MultiPoint::scale(double factor)
 {
@@ -18,19 +18,12 @@ void MultiPoint::scale(double factor_x, double factor_y)
 {
     for (Point &pt : points)
     {
-        pt(0) *= factor_x;
-        pt(1) *= factor_y;
+		pt(0) = coord_t(pt(0) * factor_x);
+		pt(1) = coord_t(pt(1) * factor_y);
     }
 }
 
-void MultiPoint::translate(double x, double y)
-{
-    Vector v(x, y);
-    for (Point &pt : points)
-        pt += v;
-}
-
-void MultiPoint::translate(const Point &v)
+void MultiPoint::translate(const Vector &v)
 {
     for (Point &pt : points)
         pt += v;
@@ -57,51 +50,38 @@ void MultiPoint::rotate(double angle, const Point &center)
     }
 }
 
-void MultiPoint::reverse()
-{
-    std::reverse(this->points.begin(), this->points.end());
-}
-
-Point MultiPoint::first_point() const
-{
-    return this->points.front();
-}
-
-double
-MultiPoint::length() const
-{
-    Lines lines = this->lines();
-    double len = 0;
-    for (Lines::iterator it = lines.begin(); it != lines.end(); ++it) {
-        len += it->length();
-    }
-    return len;
-}
-
-int
-MultiPoint::find_point(const Point &point) const
+int MultiPoint::find_point(const Point &point) const
 {
     for (const Point &pt : this->points)
         if (pt == point)
-            return &pt - &this->points.front();
+            return int(&pt - &this->points.front());
     return -1;  // not found
 }
 
-bool
-MultiPoint::has_boundary_point(const Point &point) const
+int MultiPoint::find_point(const Point &point, coordf_t scaled_epsilon) const
 {
-    double dist = (point.projection_onto(*this) - point).cast<double>().norm();
-    return dist < SCALED_EPSILON;
+    if (scaled_epsilon == 0)
+        return this->find_point(point);
+
+    coordf_t dist2_min = std::numeric_limits<coordf_t>::max();
+    coordf_t eps2      = scaled_epsilon * scaled_epsilon;
+    int      idx_min   = -1;
+    for (const Point &pt : this->points) {
+        coordf_t d2 = pt.distance_to_square(point); //(pt - point).cast<coordf_t>().squaredNorm();
+        if (d2 < dist2_min) {
+            idx_min = int(&pt - &this->points.front());
+            dist2_min = d2;
+        }
+    }
+    return dist2_min < eps2 ? idx_min : -1;
 }
 
-BoundingBox
-MultiPoint::bounding_box() const
+BoundingBox MultiPoint::bounding_box() const
 {
     return BoundingBox(this->points);
 }
 
-bool 
-MultiPoint::has_duplicate_points() const
+bool MultiPoint::has_duplicate_points() const
 {
     for (size_t i = 1; i < points.size(); ++i)
         if (points[i-1] == points[i])
@@ -109,8 +89,7 @@ MultiPoint::has_duplicate_points() const
     return false;
 }
 
-bool
-MultiPoint::remove_duplicate_points()
+bool MultiPoint::remove_duplicate_points()
 {
     size_t j = 0;
     for (size_t i = 1; i < points.size(); ++i) {
@@ -129,84 +108,46 @@ MultiPoint::remove_duplicate_points()
     return false;
 }
 
-bool
-MultiPoint::intersection(const Line& line, Point* intersection) const
-{
-    Lines lines = this->lines();
-    for (Lines::const_iterator it = lines.begin(); it != lines.end(); ++it) {
-        if (it->intersection(line, intersection)) return true;
-    }
-    return false;
-}
-
-bool MultiPoint::first_intersection(const Line& line, Point* intersection) const
-{
-    bool   found = false;
-    double dmin  = 0.;
-    for (const Line &l : this->lines()) {
-        Point ip;
-        if (l.intersection(line, &ip)) {
-            if (! found) {
-                found = true;
-                dmin = (line.a - ip).cast<double>().norm();
-                *intersection = ip;
-            } else {
-                double d = (line.a - ip).cast<double>().norm();
-                if (d < dmin) {
-                    dmin = d;
-                    *intersection = ip;
-                }
+// Projection of a point onto the polygon.
+//FIXME: delete this, it's moved somewhere.
+std::pair<Point, size_t> MultiPoint::point_projection(const Point &point) const {
+    size_t pt_idx = size_t(-1);
+    Point proj = point;
+    double dmin = std::numeric_limits<double>::max();
+    if (!this->points.empty()) {
+        for (size_t i = 0; i < this->points.size()-1; ++i) {
+            const Point &pt0 = this->points[i];
+            const Point &pt1 = this->points[i + 1];
+            double d = pt0.distance_to(point);
+            if (d < dmin) {
+                dmin = d;
+                proj = pt0;
+                pt_idx = i;
             }
-        }
-    }
-    return found;
-}
-
-std::vector<Point> MultiPoint::_douglas_peucker(const std::vector<Point>& pts, const double tolerance)
-{
-    std::vector<Point> result_pts;
-    if (! pts.empty()) {
-        const Point  *anchor      = &pts.front();
-        size_t        anchor_idx  = 0;
-        const Point  *floater     = &pts.back();
-        size_t        floater_idx = pts.size() - 1;
-        result_pts.reserve(pts.size());
-        result_pts.emplace_back(*anchor);
-        if (anchor_idx != floater_idx) {
-            assert(pts.size() > 1);
-            std::vector<size_t> dpStack;
-            dpStack.reserve(pts.size());
-            dpStack.emplace_back(floater_idx);
-            for (;;) {
-                double max_distSq   = 0.0;
-                size_t furthest_idx = anchor_idx;
-                // find point furthest from line seg created by (anchor, floater) and note it
-                for (size_t i = anchor_idx + 1; i < floater_idx; ++ i) {
-                    double dist = Line::distance_to_squared(pts[i], *anchor, *floater);
-                    if (dist > max_distSq) {
-                        max_distSq   = dist;
-                        furthest_idx = i;
+            d = pt1.distance_to(point);
+            if (d < dmin) {
+                dmin = d;
+                proj = pt1;
+                pt_idx = i + 1;
+            }
+            Vec2d v1(coordf_t(pt1(0) - pt0(0)), coordf_t(pt1(1) - pt0(1)));
+            coordf_t div = dot(v1);
+            if (div > 0.) {
+                Vec2d v2(coordf_t(point(0) - pt0(0)), coordf_t(point(1) - pt0(1)));
+                coordf_t t = dot(v1, v2) / div;
+                if (t > 0. && t < 1.) {
+                    Point foot(coord_t(floor(coordf_t(pt0(0)) + t * v1(0) + 0.5)), coord_t(floor(coordf_t(pt0(1)) + t * v1(1) + 0.5)));
+                    d = foot.distance_to(point);
+                    if (d < dmin) {
+                        dmin = d;
+                        proj = foot;
+                        pt_idx = i;
                     }
                 }
-                // remove point if less than tolerance
-                if (max_distSq <= tolerance) {
-                    result_pts.emplace_back(*floater);
-                    anchor_idx = floater_idx;
-                    anchor     = floater;
-                    assert(dpStack.back() == floater_idx);
-                    dpStack.pop_back();
-                    if (dpStack.empty())
-                        break;
-                    floater_idx = dpStack.back();
-                } else {
-                    floater_idx = furthest_idx;
-                    dpStack.emplace_back(floater_idx);
-                }
-                floater = &pts[floater_idx];
             }
         }
     }
-    return result_pts;
+    return {proj, pt_idx};
 }
 
 // Visivalingam simplification algorithm https://github.com/slic3r/Slic3r/pull/3825
@@ -231,7 +172,7 @@ struct vis_node{
     // other node if it's area is less than the other node's area
     bool operator<(const vis_node& other) { return (this->area < other.area); }
 };
-Points MultiPoint::visivalingam(const Points& pts, const double& tolerance)
+Points MultiPoint::visivalingam(const Points &pts, const double tolerance)
 {
     // Make sure there's enough points in "pts" to bother with simplification.
     assert(pts.size() >= 2);
@@ -332,22 +273,14 @@ Points MultiPoint::visivalingam(const Points& pts, const double& tolerance)
 void MultiPoint3::translate(double x, double y)
 {
     for (Vec3crd &p : points) {
-        p(0) += x;
-        p(1) += y;
+        p(0) += coord_t(x);
+        p(1) += coord_t(y);
     }
 }
 
 void MultiPoint3::translate(const Point& vector)
 {
     this->translate(vector(0), vector(1));
-}
-
-double MultiPoint3::length() const
-{
-    double len = 0.0;
-    for (const Line3& line : this->lines())
-        len += line.length();
-    return len;
 }
 
 BoundingBox3 MultiPoint3::bounding_box() const

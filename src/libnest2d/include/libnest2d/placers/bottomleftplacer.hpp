@@ -7,15 +7,15 @@
 
 namespace libnest2d { namespace placers {
 
-template<class T, class = T> struct Epsilon {};
+template<class T, class = T> struct DefaultEpsilon {};
 
 template<class T>
-struct Epsilon<T, enable_if_t<std::is_integral<T>::value, T> > {
+struct DefaultEpsilon<T, enable_if_t<std::is_integral<T>::value, T> > {
     static const T Value = 1;
 };
 
 template<class T>
-struct Epsilon<T, enable_if_t<std::is_floating_point<T>::value, T> > {
+struct DefaultEpsilon<T, enable_if_t<std::is_floating_point<T>::value, T> > {
     static const T Value = 1e-3;
 };
 
@@ -24,7 +24,7 @@ struct BLConfig {
     DECLARE_MAIN_TYPES(RawShape);
 
     Coord min_obj_distance = 0;
-    Coord epsilon = Epsilon<Coord>::Value;
+    Coord epsilon = DefaultEpsilon<Coord>::Value;
     bool allow_rotations = false;
 };
 
@@ -68,11 +68,11 @@ public:
         return toWallPoly(item, Dir::DOWN);
     }
 
-    inline Unit availableSpaceLeft(const Item& item) {
+    inline Coord availableSpaceLeft(const Item& item) {
         return availableSpace(item, Dir::LEFT);
     }
 
-    inline Unit availableSpaceDown(const Item& item) {
+    inline Coord availableSpaceDown(const Item& item) {
         return availableSpace(item, Dir::DOWN);
     }
 
@@ -83,7 +83,7 @@ protected:
         // Get initial position for item in the top right corner
         setInitialPosition(item);
 
-        Unit d = availableSpaceDown(item);
+        Coord d = availableSpaceDown(item);
         auto eps = config_.epsilon;
         bool can_move = d > eps;
         bool can_be_packed = can_move;
@@ -91,12 +91,12 @@ protected:
 
         while(can_move) {
             if(left) { // write previous down move and go down
-                item.translate({0, -d+eps});
+                item.translate({ 0, -d + eps });
                 d = availableSpaceLeft(item);
                 can_move = d > eps;
                 left = false;
             } else { // write previous left move and go down
-                item.translate({-d+eps, 0});
+                item.translate({ -d + eps, 0 });
                 d = availableSpaceDown(item);
                 can_move = d > eps;
                 left = true;
@@ -179,7 +179,7 @@ protected:
         return ret;
     }
 
-    Unit availableSpace(const Item& _item, const Dir dir) {
+    Coord availableSpace(const Item& _item, const Dir dir) {
 
         Item item (_item.transformedShape());
 
@@ -223,7 +223,7 @@ protected:
                                                    cmp);
 
         // Get the initial distance in floating point
-        Unit m = getCoord(*minvertex_it);
+        Coord m = getCoord(*minvertex_it);
 
         // Check available distance for every vertex of item to the objects
         // in the way for the nearest intersection
@@ -365,51 +365,56 @@ protected:
         // the additional vertices for maintaning min object distance
         sl::reserve(rsh, finish-start+4);
 
-        /*auto addOthers = [&rsh, finish, start, &item](){
+        auto addOthers_ = [&rsh, finish, start, &item](){
             for(size_t i = start+1; i < finish; i++)
                 sl::addVertex(rsh, item.vertex(i));
-        };*/
+        };
 
-        auto reverseAddOthers = [&rsh, finish, start, &item](){
+        auto reverseAddOthers_ = [&rsh, finish, start, &item](){
             for(auto i = finish-1; i > start; i--)
-                sl::addVertex(rsh, item.vertex(
-                                         static_cast<unsigned long>(i)));
+                sl::addVertex(rsh, item.vertex(static_cast<unsigned long>(i)));
+        };
+
+        auto addOthers = [&]() {
+            if constexpr (!is_clockwise<RawShape>())
+                addOthers_();
+            else
+                reverseAddOthers_();
         };
 
         // Final polygon construction...
-
-        static_assert(OrientationType<RawShape>::Value ==
-                      Orientation::CLOCKWISE,
-                      "Counter clockwise toWallPoly() Unimplemented!");
 
         // Clockwise polygon construction
 
         sl::addVertex(rsh, topleft_vertex);
 
-        if(dir == Dir::LEFT) reverseAddOthers();
+        if(dir == Dir::LEFT) addOthers();
         else {
-            sl::addVertex(rsh, getX(topleft_vertex), 0);
-            sl::addVertex(rsh, getX(bottomleft_vertex), 0);
+            sl::addVertex(rsh, {getX(topleft_vertex), 0});
+            sl::addVertex(rsh, {getX(bottomleft_vertex), 0});
         }
 
         sl::addVertex(rsh, bottomleft_vertex);
 
         if(dir == Dir::LEFT) {
-            sl::addVertex(rsh, 0, getY(bottomleft_vertex));
-            sl::addVertex(rsh, 0, getY(topleft_vertex));
+            sl::addVertex(rsh, {0, getY(bottomleft_vertex)});
+            sl::addVertex(rsh, {0, getY(topleft_vertex)});
         }
-        else reverseAddOthers();
+        else addOthers();
 
 
         // Close the polygon
-        sl::addVertex(rsh, topleft_vertex);
+        if constexpr (ClosureTypeV<RawShape> == Closure::CLOSED)
+            sl::addVertex(rsh, topleft_vertex);
+
+        if constexpr (!is_clockwise<RawShape>())
+            std::reverse(rsh.begin(), rsh.end());
 
         return ret;
     }
 
 };
 
-}
-}
+}} // namespace libnest2d::placers
 
 #endif //BOTTOMLEFT_HPP

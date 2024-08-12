@@ -1,10 +1,16 @@
+///|/ Copyright (c) Prusa Research 2016 - 2021 Vojtěch Bubník @bubnikv
+///|/ Copyright (c) SuperSlicer 2019 Remi Durand @supermerill
+///|/
+///|/ PrusaSlicer is released under the terms of the AGPLv3 or higher
+///|/
 #include "../ClipperUtils.hpp"
-#include "../PolylineCollection.hpp"
+#include "../ShortestPath.hpp"
 #include "../Surface.hpp"
 
 #include "Fill3DHoneycomb.hpp"
 
 namespace Slic3r {
+
 
 /*
 Creates a contiguous sequence of points at a specified height that make
@@ -55,8 +61,8 @@ static std::vector<coordf_t> perpendPoints(const coordf_t offset, const size_t b
 static inline void trim(Pointfs &pts, coordf_t minX, coordf_t minY, coordf_t maxX, coordf_t maxY)
 {
     for (Vec2d &pt : pts) {
-        pt(0) = clamp(minX, maxX, pt(0));
-        pt(1) = clamp(minY, maxY, pt(1));
+        pt.x() = std::clamp(pt.x(), minX, maxX);
+        pt.y() = std::clamp(pt.y(), minY, maxY);
     }
 }
 
@@ -137,68 +143,39 @@ void Fill3DHoneycomb::_fill_surface_single(
     const FillParams                &params, 
     unsigned int                     thickness_layers,
     const std::pair<float, Point>   &direction, 
-    ExPolygon                       &expolygon, 
-    Polylines                       &polylines_out)
+    ExPolygon                        expolygon,
+    Polylines                       &polylines_out) const
 {
     // no rotation is supported for this infill pattern
     BoundingBox bb = expolygon.contour.bounding_box();
-    coord_t     distance = coord_t(scale_(this->spacing) / params.density);
+    coord_t     distance = _line_spacing_for_density(params);
 
     // align bounding box to a multiple of our honeycomb grid module
     // (a module is 2*$distance since one $distance half-module is 
     // growing while the other $distance half-module is shrinking)
-    bb.merge(_align_to_grid(bb.min, Point(2*distance, 2*distance)));
+    bb.merge(align_to_grid(bb.min, Point(2*distance, 2*distance)));
     
     // generate pattern
     Polylines   polylines = makeGrid(
         scale_(this->z),
         distance,
-        ceil(bb.size()(0) / distance) + 1,
-        ceil(bb.size()(1) / distance) + 1,
-        ((this->layer_id/thickness_layers) % 2) + 1);
+        (size_t)ceil(bb.size().x() / distance) + 1,
+        (size_t)ceil(bb.size().y() / distance) + 1,
+		size_t((this->layer_id / thickness_layers) % 2) + 1);
+	//makeGrid(coord_t z, coord_t gridSize, size_t gridWidth, size_t gridHeight, size_t curveType)
     
     // move pattern in place
-    for (Polylines::iterator it = polylines.begin(); it != polylines.end(); ++ it)
-        it->translate(bb.min(0), bb.min(1));
+	for (Polyline &pl : polylines)
+		pl.translate(bb.min);
 
-    // clip pattern to boundaries
-    polylines = intersection_pl(polylines, (Polygons)expolygon);
+    // clip pattern to boundaries, chain the clipped polylines
+    polylines = intersection_pl(polylines, expolygon);
 
-    // connect lines
-    if (! params.dont_connect && ! polylines.empty()) { // prevent calling leftmost_point() on empty collections
-        ExPolygon expolygon_off;
-        {
-            ExPolygons expolygons_off = offset_ex(expolygon, SCALED_EPSILON);
-            if (! expolygons_off.empty()) {
-                // When expanding a polygon, the number of islands could only shrink. Therefore the offset_ex shall generate exactly one expanded island for one input island.
-                assert(expolygons_off.size() == 1);
-                std::swap(expolygon_off, expolygons_off.front());
-            }
-        }
-        Polylines chained = PolylineCollection::chained_path_from(
-            std::move(polylines), 
-            PolylineCollection::leftmost_point(polylines), false); // reverse allowed
-        bool first = true;
-        for (Polylines::iterator it_polyline = chained.begin(); it_polyline != chained.end(); ++ it_polyline) {
-            if (! first) {
-                // Try to connect the lines.
-                Points &pts_end = polylines_out.back().points;
-                const Point &first_point = it_polyline->points.front();
-                const Point &last_point = pts_end.back();
-                // TODO: we should also check that both points are on a fill_boundary to avoid 
-                // connecting paths on the boundaries of internal regions
-                if ((last_point - first_point).cast<double>().norm() <= 1.5 * distance && 
-                    expolygon_off.contains(Line(last_point, first_point))) {
-                    // Append the polyline.
-                    pts_end.insert(pts_end.end(), it_polyline->points.begin(), it_polyline->points.end());
-                    continue;
-                }
-            }
-            // The lines cannot be connected.
-            polylines_out.emplace_back(std::move(*it_polyline));
-            first = false;
-        }
-    }
+    // connect lines if needed
+    if (params.connection == icNotConnected || polylines.size() <= 1)
+        append(polylines_out, chain_polylines(std::move(polylines)));
+    else
+        this->connect_infill(std::move(polylines), expolygon, polylines_out, scale_t(this->get_spacing()), params);
 }
 
 } // namespace Slic3r

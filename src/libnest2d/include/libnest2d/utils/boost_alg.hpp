@@ -19,7 +19,7 @@
 #pragma warning(pop)
 #endif
 // this should be removed to not confuse the compiler
-// #include <libnest2d.h>
+// #include "../libnest2d.hpp"
 
 namespace bp2d {
 
@@ -30,6 +30,10 @@ using libnest2d::PolygonImpl;
 using libnest2d::PathImpl;
 using libnest2d::Orientation;
 using libnest2d::OrientationType;
+using libnest2d::OrientationTypeV;
+using libnest2d::ClosureType;
+using libnest2d::Closure;
+using libnest2d::ClosureTypeV;
 using libnest2d::getX;
 using libnest2d::getY;
 using libnest2d::setX;
@@ -213,8 +217,15 @@ struct ToBoostOrienation<bp2d::Orientation::COUNTER_CLOCKWISE> {
     static const order_selector Value = counterclockwise;
 };
 
-static const bp2d::Orientation RealOrientation =
-        bp2d::OrientationType<bp2d::PolygonImpl>::Value;
+template<bp2d::Closure> struct ToBoostClosure {};
+
+template<> struct ToBoostClosure<bp2d::Closure::OPEN> {
+    static const constexpr closure_selector Value = closure_selector::open;
+};
+
+template<> struct ToBoostClosure<bp2d::Closure::CLOSED> {
+    static const constexpr closure_selector Value = closure_selector::closed;
+};
 
 // Ring implementation /////////////////////////////////////////////////////////
 
@@ -225,12 +236,13 @@ template<> struct tag<bp2d::PathImpl> {
 
 template<> struct point_order<bp2d::PathImpl> {
     static const order_selector value =
-            ToBoostOrienation<RealOrientation>::Value;
+        ToBoostOrienation<bp2d::OrientationTypeV<bp2d::PathImpl>>::Value;
 };
 
 // All our Paths should be closed for the bin packing application
 template<> struct closure<bp2d::PathImpl> {
-    static const closure_selector value = closed;
+    static const constexpr closure_selector value =
+        ToBoostClosure< bp2d::ClosureTypeV<bp2d::PathImpl> >::Value;
 };
 
 // Polygon implementation //////////////////////////////////////////////////////
@@ -311,19 +323,19 @@ struct range_value<bp2d::Shapes> {
 
 namespace libnest2d { // Now the algorithms that boost can provide...
 
-namespace pointlike {
-template<>
-inline double distance(const PointImpl& p1, const PointImpl& p2 )
-{
-    return boost::geometry::distance(p1, p2);
-}
+//namespace pointlike {
+//template<>
+//inline double distance(const PointImpl& p1, const PointImpl& p2 )
+//{
+//    return boost::geometry::distance(p1, p2);
+//}
 
-template<>
-inline double distance(const PointImpl& p, const bp2d::Segment& seg )
-{
-    return boost::geometry::distance(p, seg);
-}
-}
+//template<>
+//inline double distance(const PointImpl& p, const bp2d::Segment& seg )
+//{
+//    return boost::geometry::distance(p, seg);
+//}
+//}
 
 namespace shapelike {
 // Tell libnest2d how to make string out of a ClipperPolygon object
@@ -356,13 +368,15 @@ inline double area(const PolygonImpl& shape, const PolygonTag&)
 #endif
 
 template<>
-inline bool isInside(const PointImpl& point, const PolygonImpl& shape)
+inline bool isInside(const PointImpl& point, const PolygonImpl& shape,
+                     const PointTag&, const PolygonTag&)
 {
     return boost::geometry::within(point, shape);
 }
 
 template<>
-inline bool isInside(const PolygonImpl& sh1, const PolygonImpl& sh2)
+inline bool isInside(const PolygonImpl& sh1, const PolygonImpl& sh2,
+                     const PolygonTag&, const PolygonTag&)
 {
     return boost::geometry::within(sh1, sh2);
 }
@@ -380,16 +394,9 @@ inline bool touches( const PointImpl& point, const PolygonImpl& shape)
 }
 
 #ifndef DISABLE_BOOST_BOUNDING_BOX
-template<>
-inline bp2d::Box boundingBox(const PolygonImpl& sh, const PolygonTag&)
-{
-    bp2d::Box b;
-    boost::geometry::envelope(sh, b);
-    return b;
-}
 
 template<>
-inline bp2d::Box boundingBox(const PathImpl& sh, const PolygonTag&)
+inline bp2d::Box boundingBox(const PathImpl& sh, const PathTag&)
 {
     bp2d::Box b;
     boost::geometry::envelope(sh, b);
@@ -408,9 +415,9 @@ inline bp2d::Box boundingBox<bp2d::Shapes>(const bp2d::Shapes& shapes,
 
 #ifndef DISABLE_BOOST_CONVEX_HULL
 template<>
-inline PolygonImpl convexHull(const PolygonImpl& sh, const PolygonTag&)
+inline PathImpl convexHull(const PathImpl& sh, const PathTag&)
 {
-    PolygonImpl ret;
+    PathImpl ret;
     boost::geometry::convex_hull(sh, ret);
     return ret;
 }
@@ -461,7 +468,7 @@ template<> inline std::string serialize<libnest2d::Formats::SVG>(
             auto& v = *it;
             hf.emplace_back(getX(v)*scale, getY(v)*scale);
         };
-        holes.push_back(hf);
+        holes.emplace_back(std::move(hf));
     }
 
     Polygonf poly;

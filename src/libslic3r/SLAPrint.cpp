@@ -1,78 +1,159 @@
+///|/ Copyright (c) Prusa Research 2018 - 2023 Tomáš Mészáros @tamasmeszaros, Lukáš Matěna @lukasmatena, Pavel Mikuš @Godrak, Oleksandra Iushchenko @YuSanka, Vojtěch Bubník @bubnikv, Roman Beránek @zavorka, Enrico Turri @enricoturri1966
+///|/ Copyright (c) 2022 ole00 @ole00
+///|/
+///|/ PrusaSlicer is released under the terms of the AGPLv3 or higher
+///|/
 #include "SLAPrint.hpp"
-#include "SLA/SLASupportTree.hpp"
-#include "SLA/SLABasePool.hpp"
-#include "MTUtils.hpp"
+#include "SLAPrintSteps.hpp"
+#include "CSGMesh/CSGMeshCopy.hpp"
+#include "CSGMesh/PerformCSGMeshBooleans.hpp"
+#include "format.hpp"
+#include "StaticMap.hpp"
+
+#include "Format/SLAArchiveFormatRegistry.hpp"
+
+#include "Geometry.hpp"
+#include "Thread.hpp"
 
 #include <unordered_set>
 #include <numeric>
 
 #include <tbb/parallel_for.h>
+#include <boost/filesystem/path.hpp>
 #include <boost/log/trivial.hpp>
 
-//#include <tbb/spin_mutex.h>//#include "tbb/mutex.h"
+// #define SLAPRINT_DO_BENCHMARK
+
+#ifdef SLAPRINT_DO_BENCHMARK
+#include <libnest2d/tools/benchmark.h>
+#endif
 
 #include "I18N.hpp"
 
 //! macro used to mark string used at localization,
 //! return same string
-#define L(s) Slic3r::I18N::translate(s)
+#define _u8L(s) Slic3r::I18N::translate(s)
 
 namespace Slic3r {
 
-using SupportTreePtr = std::unique_ptr<sla::SLASupportTree>;
 
-class SLAPrintObject::SupportData {
-public:
-    sla::EigenMesh3D emesh;              // index-triangle representation
-    sla::PointSet    support_points;     // all the support points (manual/auto)
-    SupportTreePtr   support_tree_ptr;   // the supports
-    SlicedSupports   support_slices;     // sliced supports
-    std::vector<LevelID>    level_ids;
-};
-
-namespace {
-
-// should add up to 100 (%)
-const std::array<unsigned, slaposCount>     OBJ_STEP_LEVELS =
+bool is_zero_elevation(const SLAPrintObjectConfig &c)
 {
-    10,     // slaposObjectSlice,
-    10,     // slaposSupportIslands,
-    20,     // slaposSupportPoints,
-    25,     // slaposSupportTree,
-    25,     // slaposBasePool,
-    5,      // slaposSliceSupports,
-    5       // slaposIndexSlices
-};
+    return c.pad_enable.value && c.pad_around_object.value;
+}
 
-const std::array<std::string, slaposCount> OBJ_STEP_LABELS =
+// Compile the argument for support creation from the static print config.
+sla::SupportTreeConfig make_support_cfg(const SLAPrintObjectConfig& c)
 {
-    L("Slicing model"),                 // slaposObjectSlice,
-    L("Generating islands"),            // slaposSupportIslands,
-    L("Scanning model structure"),      // slaposSupportPoints,
-    L("Generating support tree"),       // slaposSupportTree,
-    L("Generating base pool"),          // slaposBasePool,
-    L("Slicing supports"),              // slaposSliceSupports,
-    L("Slicing supports")               // slaposIndexSlices,
-};
+    sla::SupportTreeConfig scfg;
 
-// Should also add up to 100 (%)
-const std::array<unsigned, slapsCount> PRINT_STEP_LEVELS =
+    scfg.enabled = c.supports_enable.value;
+    scfg.tree_type = c.support_tree_type.value;
+
+    switch(scfg.tree_type) {
+    case sla::SupportTreeType::Default: {
+        scfg.head_front_radius_mm = 0.5*c.support_head_front_diameter.value;
+        double pillar_r = 0.5 * c.support_pillar_diameter.value;
+        scfg.head_back_radius_mm = pillar_r;
+        scfg.head_fallback_radius_mm =
+            0.01 * c.support_small_pillar_diameter_percent.value * pillar_r;
+        scfg.head_penetration_mm = c.support_head_penetration.value;
+        scfg.head_width_mm = c.support_head_width.value;
+        scfg.object_elevation_mm = is_zero_elevation(c) ?
+                                       0. : c.support_object_elevation.value;
+        scfg.bridge_slope = c.support_critical_angle.value * PI / 180.0 ;
+        scfg.max_bridge_length_mm = c.support_max_bridge_length.value;
+        scfg.max_pillar_link_distance_mm = c.support_max_pillar_link_distance.value;
+        scfg.pillar_connection_mode = c.support_pillar_connection_mode.value;
+        scfg.ground_facing_only = c.support_buildplate_only.value;
+        scfg.pillar_widening_factor = c.support_pillar_widening_factor.value;
+        scfg.base_radius_mm = 0.5*c.support_base_diameter.value;
+        scfg.base_height_mm = c.support_base_height.value;
+        scfg.pillar_base_safety_distance_mm =
+            c.support_base_safety_distance.value < EPSILON ?
+                scfg.safety_distance_mm : c.support_base_safety_distance.value;
+
+        scfg.max_bridges_on_pillar = unsigned(c.support_max_bridges_on_pillar.value);
+        scfg.max_weight_on_model_support = c.support_max_weight_on_model.value;
+        break;
+    }
+    case sla::SupportTreeType::Branching:
+        [[fallthrough]];
+    case sla::SupportTreeType::Organic:{
+        scfg.head_front_radius_mm = 0.5*c.branchingsupport_head_front_diameter.value;
+        double pillar_r = 0.5 * c.branchingsupport_pillar_diameter.value;
+        scfg.head_back_radius_mm = pillar_r;
+        scfg.head_fallback_radius_mm =
+            0.01 * c.branchingsupport_small_pillar_diameter_percent.value * pillar_r;
+        scfg.head_penetration_mm = c.branchingsupport_head_penetration.value;
+        scfg.head_width_mm = c.branchingsupport_head_width.value;
+        scfg.object_elevation_mm = is_zero_elevation(c) ?
+                                       0. : c.branchingsupport_object_elevation.value;
+        scfg.bridge_slope = c.branchingsupport_critical_angle.value * PI / 180.0 ;
+        scfg.max_bridge_length_mm = c.branchingsupport_max_bridge_length.value;
+        scfg.max_pillar_link_distance_mm = c.branchingsupport_max_pillar_link_distance.value;
+        scfg.pillar_connection_mode = c.branchingsupport_pillar_connection_mode.value;
+        scfg.ground_facing_only = c.branchingsupport_buildplate_only.value;
+        scfg.pillar_widening_factor = c.branchingsupport_pillar_widening_factor.value;
+        scfg.base_radius_mm = 0.5*c.branchingsupport_base_diameter.value;
+        scfg.base_height_mm = c.branchingsupport_base_height.value;
+        scfg.pillar_base_safety_distance_mm =
+            c.branchingsupport_base_safety_distance.value < EPSILON ?
+                scfg.safety_distance_mm : c.branchingsupport_base_safety_distance.value;
+
+        scfg.max_bridges_on_pillar = unsigned(c.branchingsupport_max_bridges_on_pillar.value);
+        scfg.max_weight_on_model_support = c.branchingsupport_max_weight_on_model.value;
+        break;
+    }
+    }
+    
+    return scfg;
+}
+
+sla::PadConfig::EmbedObject builtin_pad_cfg(const SLAPrintObjectConfig& c)
 {
-    80,     // slapsRasterize
-    20,     // slapsValidate
-};
+    sla::PadConfig::EmbedObject ret;
+    
+    ret.enabled = is_zero_elevation(c);
+    
+    if(ret.enabled) {
+        ret.everywhere           = c.pad_around_object_everywhere.value;
+        ret.object_gap_mm        = c.pad_object_gap.value;
+        ret.stick_width_mm       = c.pad_object_connector_width.value;
+        ret.stick_stride_mm      = c.pad_object_connector_stride.value;
+        ret.stick_penetration_mm = c.pad_object_connector_penetration.value;
+    }
+    
+    return ret;
+}
 
-const std::array<std::string, slapsCount> PRINT_STEP_LABELS =
+sla::PadConfig make_pad_cfg(const SLAPrintObjectConfig& c)
 {
-    L("Rasterizing layers"),         // slapsRasterize
-    L("Validating"),                 // slapsValidate
-};
+    sla::PadConfig pcfg;
+    
+    pcfg.wall_thickness_mm = c.pad_wall_thickness.value;
+    pcfg.wall_slope = c.pad_wall_slope.value * PI / 180.0;
+    
+    pcfg.max_merge_dist_mm = c.pad_max_merge_distance.value;
+    pcfg.wall_height_mm = c.pad_wall_height.value;
+    pcfg.brim_size_mm = c.pad_brim_size.value;
+    
+    // set builtin pad implicitly ON
+    pcfg.embed_object = builtin_pad_cfg(c);
+    
+    return pcfg;
+}
 
+bool validate_pad(const indexed_triangle_set &pad, const sla::PadConfig &pcfg)
+{
+    // An empty pad can only be created if embed_object mode is enabled
+    // and the pad is not forced everywhere
+    return !pad.empty() || (pcfg.embed_object.enabled && !pcfg.embed_object.everywhere);
 }
 
 void SLAPrint::clear()
 {
-    tbb::mutex::scoped_lock lock(this->state_mutex());
+    std::scoped_lock<std::mutex> lock(this->state_mutex());
     // The following call should stop background processing if it is running.
     this->invalidate_all_steps();
     for (SLAPrintObject *object : m_objects)
@@ -82,46 +163,121 @@ void SLAPrint::clear()
 }
 
 // Transformation without rotation around Z and without a shift by X and Y.
-static Transform3d sla_trafo(const ModelObject &model_object)
+Transform3d SLAPrint::sla_trafo(const ModelObject &model_object) const
 {
     ModelInstance &model_instance = *model_object.instances.front();
-    Vec3d          offset         = model_instance.get_offset();
-    Vec3d          rotation       = model_instance.get_rotation();
-    offset(0) = 0.;
-    offset(1) = 0.;
-    rotation(2) = 0.;
-    return Geometry::assemble_transform(offset, rotation, model_instance.get_scaling_factor(), model_instance.get_mirror());
+    auto trafo = Transform3d::Identity();
+    trafo.translate(Vec3d{ 0., 0., model_instance.get_offset().z() * this->relative_correction().z() });
+    trafo.linear() = Eigen::DiagonalMatrix<double, 3, 3>(this->relative_correction()) * model_instance.get_matrix().linear();
+    if (model_instance.is_left_handed())
+        trafo = Eigen::Scaling(Vec3d(-1., 1., 1.)) * trafo;
+    return trafo;
 }
 
 // List of instances, where the ModelInstance transformation is a composite of sla_trafo and the transformation defined by SLAPrintObject::Instance.
 static std::vector<SLAPrintObject::Instance> sla_instances(const ModelObject &model_object)
 {
     std::vector<SLAPrintObject::Instance> instances;
-    for (ModelInstance *model_instance : model_object.instances)
-        if (model_instance->is_printable()) {
-            instances.emplace_back(SLAPrintObject::Instance(
-                model_instance->id(),
-                Point::new_scale(model_instance->get_offset(X), model_instance->get_offset(Y)),
-                float(model_instance->get_rotation(Z))));
-        }
+    assert(! model_object.instances.empty());
+    if (! model_object.instances.empty()) {
+        const Transform3d& trafo0 = model_object.instances.front()->get_matrix();
+        for (ModelInstance *model_instance : model_object.instances)
+            if (model_instance->is_printable()) {
+                instances.emplace_back(
+                    model_instance->id(),
+                    Point::new_scale(model_instance->get_offset(X), model_instance->get_offset(Y)),
+                    float(Geometry::rotation_diff_z(trafo0, model_instance->get_matrix())));
+            }
+    }
     return instances;
 }
 
-SLAPrint::ApplyStatus SLAPrint::apply(const Model &model, const DynamicPrintConfig &config_in)
+std::vector<ObjectID> SLAPrint::print_object_ids() const 
+{ 
+    std::vector<ObjectID> out;
+    // Reserve one more for the caller to append the ID of the Print itself.
+    out.reserve(m_objects.size() + 1);
+    for (const SLAPrintObject *print_object : m_objects)
+        out.emplace_back(print_object->id());
+    return out;
+}
+
+static t_config_option_keys print_config_diffs(const StaticPrintConfig     &current_config,
+                                               const DynamicPrintConfig &new_full_config,
+                                               DynamicPrintConfig       &material_overrides)
+{
+    using namespace std::string_view_literals;
+
+    static const constexpr StaticSet overriden_keys = {
+        "support_head_front_diameter"sv,
+        "support_head_penetration"sv,
+        "support_head_width"sv,
+        "support_pillar_diameter"sv,
+        "branchingsupport_head_front_diameter"sv,
+        "branchingsupport_head_penetration"sv,
+        "branchingsupport_head_width"sv,
+        "branchingsupport_pillar_diameter"sv,
+        "support_points_density_relative"sv,
+        "relative_correction_x"sv,
+        "relative_correction_y"sv,
+        "relative_correction_z"sv,
+        "first_layer_size_compensation"sv,
+    };
+
+    static constexpr auto material_ow_prefix = "material_ow_";
+
+    t_config_option_keys           print_diff;
+    for (const t_config_option_key &opt_key : current_config.keys()) {
+        const ConfigOption *opt_old = current_config.option(opt_key);
+        assert(opt_old != nullptr);
+        const ConfigOption *opt_new = new_full_config.option(opt_key);
+        // assert(opt_new != nullptr);
+        if (opt_new == nullptr)
+            //FIXME This may happen when executing some test cases.
+            continue;
+        const ConfigOption *opt_new_override = std::binary_search(overriden_keys.begin(), overriden_keys.end(), opt_key) ? new_full_config.option(material_ow_prefix + opt_key) : nullptr;
+        if (opt_new_override != nullptr) {
+            // An override is available at some of the material presets.
+            if (*opt_old != *opt_new || opt_new->overriden_by(opt_new_override)) {
+                auto opt_copy = opt_new->clone();
+                bool overriden = opt_copy->apply_override(opt_new_override);
+                bool changed = *opt_old != *opt_copy;
+                if (changed)
+                    print_diff.emplace_back(opt_key);
+                if (changed || overriden) {
+                    // overrides will be applied to the placeholder parser, which layers these parameters over full_print_config.
+                    material_overrides.set_key_value(opt_key, opt_copy);
+                } else
+                    delete opt_copy;
+            }
+        } else if (*opt_new != *opt_old)
+            print_diff.emplace_back(opt_key);
+    }
+
+    return print_diff;
+}
+
+
+SLAPrint::ApplyStatus SLAPrint::apply(const Model &model, DynamicPrintConfig config)
 {
 #ifdef _DEBUG
     check_model_ids_validity(model);
 #endif /* _DEBUG */
 
-    // Make a copy of the config, normalize it.
-    DynamicPrintConfig config(config_in);
-    config.normalize();
+    // Normalize the config.
+    config.option("sla_print_settings_id",        true);
+    config.option("sla_material_settings_id",     true);
+    config.option("printer_settings_id",          true);
+    config.option("physical_printer_settings_id", true);
     // Collect changes to print config.
-    t_config_option_keys print_diff    = m_print_config.diff(config);    
-    t_config_option_keys printer_diff  = m_printer_config.diff(config);
+    DynamicPrintConfig mat_overrides;
+    t_config_option_keys print_diff    = m_print_config.diff(config);
+    t_config_option_keys printer_diff  = print_config_diffs(m_printer_config, config, mat_overrides);
     t_config_option_keys material_diff = m_material_config.diff(config);
-    t_config_option_keys object_diff   = m_default_object_config.diff(config);
-    t_config_option_keys placeholder_parser_diff = this->placeholder_parser().config_diff(config);
+    t_config_option_keys object_diff   = print_config_diffs(m_default_object_config, config, mat_overrides);
+    t_config_option_keys placeholder_parser_diff = m_placeholder_parser.config_diff(config);
+
+    config.apply(mat_overrides, true);
 
     // Do not use the ApplyStatus as we will use the max function when updating apply_status.
     unsigned int apply_status = APPLY_STATUS_UNCHANGED;
@@ -131,26 +287,27 @@ SLAPrint::ApplyStatus SLAPrint::apply(const Model &model, const DynamicPrintConf
         update_apply_status(false);
 
     // Grab the lock for the Print / PrintObject milestones.
-    tbb::mutex::scoped_lock lock(this->state_mutex());
+    std::scoped_lock<std::mutex> lock(this->state_mutex());
 
     // The following call may stop the background processing.
+    bool invalidate_all_model_objects = false;
     if (! print_diff.empty())
-        update_apply_status(this->invalidate_state_by_config_options(print_diff));
+        update_apply_status(this->invalidate_state_by_config_options(print_diff, invalidate_all_model_objects));
     if (! printer_diff.empty())
-        update_apply_status(this->invalidate_state_by_config_options(printer_diff));
+        update_apply_status(this->invalidate_state_by_config_options(printer_diff, invalidate_all_model_objects));
     if (! material_diff.empty())
-        update_apply_status(this->invalidate_state_by_config_options(material_diff));
+        update_apply_status(this->invalidate_state_by_config_options(material_diff, invalidate_all_model_objects));
 
     // Apply variables to placeholder parser. The placeholder parser is currently used
     // only to generate the output file name.
-	if (! placeholder_parser_diff.empty()) {
+    if (! placeholder_parser_diff.empty()) {
         // update_apply_status(this->invalidate_step(slapsRasterize));
-		PlaceholderParser &pp = this->placeholder_parser();
-		pp.apply_config(config);
+        m_placeholder_parser.apply_config(config);
         // Set the profile aliases for the PrintBase::output_filename()
-		pp.set("print_preset", config_in.option("sla_print_settings_id")->clone());
-		pp.set("material_preset", config_in.option("sla_material_settings_id")->clone());
-		pp.set("printer_preset", config_in.option("printer_settings_id")->clone());
+        m_placeholder_parser.set("print_preset",            config.option("sla_print_settings_id")->clone());
+        m_placeholder_parser.set("material_preset",         config.option("sla_material_settings_id")->clone());
+        m_placeholder_parser.set("printer_preset",          config.option("printer_settings_id")->clone());
+        m_placeholder_parser.set("physical_printer_preset", config.option("physical_printer_settings_id")->clone());
     }
 
     // It is also safe to change m_config now after this->invalidate_state_by_config_options() call.
@@ -161,6 +318,9 @@ SLAPrint::ApplyStatus SLAPrint::apply(const Model &model, const DynamicPrintConf
     // Handle changes to object config defaults
     m_default_object_config.apply_only(config, object_diff, true);
 
+    if (!m_archiver || !printer_diff.empty())
+        m_archiver = SLAArchiveWriter::create(m_printer_config.output_format.value, m_printer_config);
+
     struct ModelObjectStatus {
         enum Status {
             Unknown,
@@ -169,8 +329,8 @@ SLAPrint::ApplyStatus SLAPrint::apply(const Model &model, const DynamicPrintConf
             Moved,
             Deleted,
         };
-        ModelObjectStatus(ModelID id, Status status = Unknown) : id(id), status(status) {}
-        ModelID                 id;
+        ModelObjectStatus(ObjectID id, Status status = Unknown) : id(id), status(status) {}
+        ObjectID                id;
         Status                  status;
         // Search by id.
         bool operator<(const ModelObjectStatus &rhs) const { return id < rhs.id; }
@@ -178,13 +338,14 @@ SLAPrint::ApplyStatus SLAPrint::apply(const Model &model, const DynamicPrintConf
     std::set<ModelObjectStatus> model_object_status;
 
     // 1) Synchronize model objects.
-    if (model.id() != m_model.id()) {
+    if (model.id() != m_model.id() || invalidate_all_model_objects) {
         // Kill everything, initialize from scratch.
         // Stop background processing.
-        this->call_cancell_callback();
+        this->call_cancel_callback();
         update_apply_status(this->invalidate_all_steps());
         for (SLAPrintObject *object : m_objects) {
             model_object_status.emplace(object->model_object()->id(), ModelObjectStatus::Deleted);
+            update_apply_status(object->invalidate_all_steps());
             delete object;
         }
         m_objects.clear();
@@ -198,7 +359,7 @@ SLAPrint::ApplyStatus SLAPrint::apply(const Model &model, const DynamicPrintConf
                 model_object_status.emplace(model_object->id(), ModelObjectStatus::Old);
         } else if (model_object_list_extended(m_model, model)) {
             // Add new objects. Their volumes and configs will be synchronized later.
-            update_apply_status(this->invalidate_step(slapsRasterize));
+            update_apply_status(this->invalidate_step(slapsMergeSlicesAndEval));
             for (const ModelObject *model_object : m_model.objects)
                 model_object_status.emplace(model_object->id(), ModelObjectStatus::Old);
             for (size_t i = m_model.objects.size(); i < model.objects.size(); ++ i) {
@@ -209,8 +370,8 @@ SLAPrint::ApplyStatus SLAPrint::apply(const Model &model, const DynamicPrintConf
         } else {
             // Reorder the objects, add new objects.
             // First stop background processing before shuffling or deleting the PrintObjects in the object list.
-            this->call_cancell_callback();
-            update_apply_status(this->invalidate_step(slapsRasterize));
+            this->call_cancel_callback();
+            update_apply_status(this->invalidate_step(slapsMergeSlicesAndEval));
             // Second create a new list of objects.
             std::vector<ModelObject*> model_objects_old(std::move(m_model.objects));
             m_model.objects.clear();
@@ -272,9 +433,9 @@ SLAPrint::ApplyStatus SLAPrint::apply(const Model &model, const DynamicPrintConf
             print_object(print_object),
             trafo(print_object->trafo()),
             status(status) {}
-        PrintObjectStatus(ModelID id) : id(id), print_object(nullptr), trafo(Transform3d::Identity()), status(Unknown) {}
+        PrintObjectStatus(ObjectID id) : id(id), print_object(nullptr), trafo(Transform3d::Identity()), status(Unknown) {}
         // ID of the ModelObject & PrintObject
-        ModelID          id;
+        ObjectID         id;
         // Pointer to the old PrintObject
         SLAPrintObject  *print_object;
         // Trafo generated with model_object->world_matrix(true)
@@ -296,652 +457,458 @@ SLAPrint::ApplyStatus SLAPrint::apply(const Model &model, const DynamicPrintConf
         auto it_status = model_object_status.find(ModelObjectStatus(model_object.id()));
         assert(it_status != model_object_status.end());
         assert(it_status->status != ModelObjectStatus::Deleted);
-        if (it_status->status == ModelObjectStatus::New)
-            // PrintObject instances will be added in the next loop.
-            continue;
-        // Update the ModelObject instance, possibly invalidate the linked PrintObjects.
-        assert(it_status->status == ModelObjectStatus::Old || it_status->status == ModelObjectStatus::Moved);
-        const ModelObject &model_object_new       = *model.objects[idx_model_object];
-        auto               it_print_object_status = print_object_status.lower_bound(PrintObjectStatus(model_object.id()));
-        if (it_print_object_status != print_object_status.end() && it_print_object_status->id != model_object.id())
-            it_print_object_status = print_object_status.end();
-        // Check whether a model part volume was added or removed, their transformations or order changed.
-        bool model_parts_differ = model_volume_list_changed(model_object, model_object_new, ModelVolume::MODEL_PART);
-        bool sla_trafo_differs  = model_object.instances.empty() != model_object_new.instances.empty() ||
-            (! model_object.instances.empty() && ! sla_trafo(model_object).isApprox(sla_trafo(model_object_new)));
-        if (model_parts_differ || sla_trafo_differs) {
-            // The very first step (the slicing step) is invalidated. One may freely remove all associated PrintObjects.
-            if (it_print_object_status != print_object_status.end()) {
-                update_apply_status(it_print_object_status->print_object->invalidate_all_steps());
-                const_cast<PrintObjectStatus&>(*it_print_object_status).status = PrintObjectStatus::Deleted;
-            }
-            // Copy content of the ModelObject including its ID, do not change the parent.
-            model_object.assign_copy(model_object_new);
-        } else {
-            // Synchronize Object's config.
-            bool object_config_changed = model_object.config != model_object_new.config;
-            if (object_config_changed)
-                model_object.config = model_object_new.config;
-            if (! object_diff.empty() || object_config_changed) {
-                SLAPrintObjectConfig new_config = m_default_object_config;
-                normalize_and_apply_config(new_config, model_object.config);
+        // PrintObject for this ModelObject, if it exists.
+        auto it_print_object_status = print_object_status.end();
+        if (it_status->status != ModelObjectStatus::New) {
+            // Update the ModelObject instance, possibly invalidate the linked PrintObjects.
+            assert(it_status->status == ModelObjectStatus::Old || it_status->status == ModelObjectStatus::Moved);
+            const ModelObject &model_object_new       = *model.objects[idx_model_object];
+            it_print_object_status = print_object_status.lower_bound(PrintObjectStatus(model_object.id()));
+            if (it_print_object_status != print_object_status.end() && it_print_object_status->id != model_object.id())
+                it_print_object_status = print_object_status.end();
+            // Check whether a model part volume was added or removed, their transformations or order changed.
+            bool model_parts_differ =
+                model_volume_list_changed(model_object, model_object_new,
+                                          {ModelVolumeType::MODEL_PART,
+                                           ModelVolumeType::NEGATIVE_VOLUME,
+                                           ModelVolumeType::SUPPORT_ENFORCER,
+                                           ModelVolumeType::SUPPORT_BLOCKER});
+            bool sla_trafo_differs  =
+                model_object.instances.empty() != model_object_new.instances.empty() ||
+                (! model_object.instances.empty() &&
+                  (! sla_trafo(model_object).isApprox(sla_trafo(model_object_new)) ||
+                    model_object.instances.front()->is_left_handed() != model_object_new.instances.front()->is_left_handed()));
+            if (model_parts_differ || sla_trafo_differs) {
+                // The very first step (the slicing step) is invalidated. One may freely remove all associated PrintObjects.
                 if (it_print_object_status != print_object_status.end()) {
-                    t_config_option_keys diff = it_print_object_status->print_object->config().diff(new_config);
-                    if (! diff.empty()) {
-                        update_apply_status(it_print_object_status->print_object->invalidate_state_by_config_options(diff));
-                        it_print_object_status->print_object->config_apply_only(new_config, diff, true);
+                    update_apply_status(it_print_object_status->print_object->invalidate_all_steps());
+                    const_cast<PrintObjectStatus&>(*it_print_object_status).status = PrintObjectStatus::Deleted;
+                }
+                // Copy content of the ModelObject including its ID, do not change the parent.
+                model_object.assign_copy(model_object_new);
+            } else {
+                // Synchronize Object's config.
+                bool object_config_changed = ! model_object.config.timestamp_matches(model_object_new.config);
+                if (object_config_changed)
+                    model_object.config.assign_config(model_object_new.config);
+                if (! object_diff.empty() || object_config_changed) {
+                    SLAPrintObjectConfig new_config = m_default_object_config;
+                    new_config.apply(model_object.config.get(), true);
+                    if (it_print_object_status != print_object_status.end()) {
+                        t_config_option_keys diff = it_print_object_status->print_object->config().diff(new_config);
+                        if (! diff.empty()) {
+                            update_apply_status(it_print_object_status->print_object->invalidate_state_by_config_options(diff));
+                            it_print_object_status->print_object->config_apply_only(new_config, diff, true);
+                        }
                     }
                 }
-            }
-            if (model_object.sla_support_points != model_object_new.sla_support_points) {
-                model_object.sla_support_points = model_object_new.sla_support_points;
-                if (it_print_object_status != print_object_status.end())
-                    update_apply_status(it_print_object_status->print_object->invalidate_step(slaposSupportPoints));
-            }
-            // Copy the ModelObject name, input_file and instances. The instances will compared against PrintObject instances in the next step.
-            model_object.name       = model_object_new.name;
-            model_object.input_file = model_object_new.input_file;
-            model_object.clear_instances();
-            model_object.instances.reserve(model_object_new.instances.size());
-            for (const ModelInstance *model_instance : model_object_new.instances) {
-                model_object.instances.emplace_back(new ModelInstance(*model_instance));
-                model_object.instances.back()->set_model_object(&model_object);
+
+                bool old_user_modified = model_object.sla_points_status == sla::PointsStatus::UserModified;
+                bool new_user_modified = model_object_new.sla_points_status == sla::PointsStatus::UserModified;
+                if ((old_user_modified && ! new_user_modified) || // switching to automatic supports from manual supports
+                    (! old_user_modified && new_user_modified) || // switching to manual supports from automatic supports
+                    (new_user_modified && model_object.sla_support_points != model_object_new.sla_support_points)) {
+                    if (it_print_object_status != print_object_status.end())
+                        update_apply_status(it_print_object_status->print_object->invalidate_step(slaposSupportPoints));
+
+                    model_object.sla_support_points = model_object_new.sla_support_points;
+                }
+                model_object.sla_points_status = model_object_new.sla_points_status;
+                
+                // Invalidate hollowing if drain holes have changed
+                if (model_object.sla_drain_holes != model_object_new.sla_drain_holes)
+                {
+                    model_object.sla_drain_holes = model_object_new.sla_drain_holes;
+                    update_apply_status(it_print_object_status->print_object->invalidate_step(slaposDrillHoles));
+                }
+
+                // Copy the ModelObject name, input_file and instances. The instances will compared against PrintObject instances in the next step.
+                model_object.name       = model_object_new.name;
+                model_object.input_file = model_object_new.input_file;
+                model_object.clear_instances();
+                model_object.instances.reserve(model_object_new.instances.size());
+                for (const ModelInstance *model_instance : model_object_new.instances) {
+                    model_object.instances.emplace_back(new ModelInstance(*model_instance));
+                    model_object.instances.back()->set_model_object(&model_object);
+                }
             }
         }
 
         std::vector<SLAPrintObject::Instance> new_instances = sla_instances(model_object);
         if (it_print_object_status != print_object_status.end() && it_print_object_status->status != PrintObjectStatus::Deleted) {
             // The SLAPrintObject is already there.
-            if (new_instances != it_print_object_status->print_object->instances()) {
-                // Instances changed.
-                it_print_object_status->print_object->set_instances(new_instances);
-                update_apply_status(this->invalidate_step(slapsRasterize));
+            if (new_instances.empty()) {
+                const_cast<PrintObjectStatus&>(*it_print_object_status).status = PrintObjectStatus::Deleted;
+            } else {
+                if (new_instances != it_print_object_status->print_object->instances()) {
+                    // Instances changed.
+                    it_print_object_status->print_object->set_instances(new_instances);
+                    update_apply_status(this->invalidate_step(slapsMergeSlicesAndEval));
+                }
+                print_objects_new.emplace_back(it_print_object_status->print_object);
+                const_cast<PrintObjectStatus&>(*it_print_object_status).status = PrintObjectStatus::Reused;
             }
-            print_objects_new.emplace_back(it_print_object_status->print_object);
-            const_cast<PrintObjectStatus&>(*it_print_object_status).status = PrintObjectStatus::Reused;
-        } else {
+        } else if (! new_instances.empty()) {
             auto print_object = new SLAPrintObject(this, &model_object);
-            print_object->set_trafo(sla_trafo(model_object));
-            print_object->set_instances(new_instances);
-            print_object->config_apply(config, true);
+
+            // FIXME: this invalidates the transformed mesh in SLAPrintObject
+            // which is expensive to calculate (especially the raw_mesh() call)
+            print_object->set_trafo(sla_trafo(model_object), model_object.instances.front()->is_left_handed());
+
+            print_object->set_instances(std::move(new_instances));
+
+            print_object->config_apply(m_default_object_config, true);
+            print_object->config_apply(model_object.config.get(), true);
             print_objects_new.emplace_back(print_object);
             new_objects = true;
         }
     }
 
     if (m_objects != print_objects_new) {
-        this->call_cancell_callback();
+        this->call_cancel_callback();
         update_apply_status(this->invalidate_all_steps());
         m_objects = print_objects_new;
         // Delete the PrintObjects marked as Unknown or Deleted.
-        bool deleted_objects = false;
         for (auto &pos : print_object_status)
             if (pos.status == PrintObjectStatus::Unknown || pos.status == PrintObjectStatus::Deleted) {
-                // update_apply_status(pos.print_object->invalidate_all_steps());
+                update_apply_status(pos.print_object->invalidate_all_steps());
                 delete pos.print_object;
-                deleted_objects = true;
             }
-        update_apply_status(new_objects);
+        if (new_objects)
+            update_apply_status(false);
     }
 
-    this->update_object_placeholders();
+    if(m_objects.empty()) {
+        m_printer_input = {};
+        m_print_statistics = {};
+    }
 
 #ifdef _DEBUG
     check_model_ids_equal(m_model, model);
 #endif /* _DEBUG */
 
+    m_full_print_config = std::move(config);
+
     return static_cast<ApplyStatus>(apply_status);
 }
 
-namespace {
-// Compile the argument for support creation from the static print config.
-sla::SupportConfig make_support_cfg(const SLAPrintObjectConfig& c) {
-    sla::SupportConfig scfg;
+// Generate a recommended output file name based on the format template, default extension, and template parameters
+// (timestamps, object placeholders derived from the model, current placeholder prameters and print statistics.
+// Use the final print statistics if available, or just keep the print statistics placeholders if not available yet (before the output is finalized).
+std::string SLAPrint::output_filename(const std::string &filename_base) const
+{
+    DynamicConfig config = this->finished() ? this->print_statistics().config() : this->print_statistics().placeholders();
+    std::string default_ext = get_default_extension(m_printer_config.output_format.value);
+    if (default_ext.empty())
+        default_ext = "sl1";
 
-    scfg.head_front_radius_mm = 0.5*c.support_head_front_diameter.getFloat();
-    scfg.head_back_radius_mm = 0.5*c.support_pillar_diameter.getFloat();
-    scfg.head_penetration_mm = c.support_head_penetration.getFloat();
-    scfg.head_width_mm = c.support_head_width.getFloat();
-    scfg.object_elevation_mm = c.support_object_elevation.getFloat();
-    scfg.tilt = c.support_critical_angle.getFloat() * PI / 180.0 ;
-    scfg.max_bridge_length_mm = c.support_max_bridge_length.getFloat();
-    scfg.headless_pillar_radius_mm = 0.375*c.support_pillar_diameter.getFloat();
-    scfg.pillar_widening_factor = c.support_pillar_widening_factor.getFloat();
-    scfg.base_radius_mm = 0.5*c.support_base_diameter.getFloat();
-    scfg.base_height_mm = c.support_base_height.getFloat();
+    default_ext.insert(default_ext.begin(), '.');
 
-    return scfg;
+    config.set_key_value("default_output_extension",
+                         new ConfigOptionString(default_ext));
+
+    return this->PrintBase::output_filename(m_print_config.output_filename_format.value, default_ext, filename_base, &config);
 }
 
-void swapXY(ExPolygon& expoly) {
-    for(auto& p : expoly.contour.points) std::swap(p(X), p(Y));
-    for(auto& h : expoly.holes) for(auto& p : h.points) std::swap(p(X), p(Y));
+std::pair<PrintBase::PrintValidationError, std::string> SLAPrint::validate(std::vector<std::string>*) const
+{
+    for(SLAPrintObject * po : m_objects) {
+
+        const ModelObject *mo = po->model_object();
+        bool supports_en = po->config().supports_enable.value;
+
+        if(supports_en &&
+           mo->sla_points_status == sla::PointsStatus::UserModified &&
+           mo->sla_support_points.empty())
+            return { PrintBase::PrintValidationError::pveWrongSettings, _u8L("Cannot proceed without support points! "
+                     "Add support points or disable support generation.") };
+
+        sla::SupportTreeConfig cfg = make_support_cfg(po->config());
+
+        double elv = cfg.object_elevation_mm;
+        
+        sla::PadConfig padcfg = make_pad_cfg(po->config());
+        sla::PadConfig::EmbedObject &builtinpad = padcfg.embed_object;
+        
+        if(supports_en && !builtinpad.enabled && elv < cfg.head_fullwidth())
+            return { PrintBase::PrintValidationError::pveWrongSettings, _u8L(
+                "Elevation is too low for object. Use the \"Pad around "
+                "object\" feature to print the object without elevation.") };
+        
+        if(supports_en && builtinpad.enabled &&
+           cfg.pillar_base_safety_distance_mm < builtinpad.object_gap_mm) {
+            return { PrintBase::PrintValidationError::pveWrongSettings, _u8L(
+                "The endings of the support pillars will be deployed on the "
+                "gap between the object and the pad. 'Support base safety "
+                "distance' has to be greater than the 'Pad object gap' "
+                "parameter to avoid this.") };
+        }
+        
+        std::string pval = padcfg.validate();
+        if (!pval.empty()) return { PrintBase::PrintValidationError::pveWrongSettings, pval };
+    }
+
+    double expt_max = m_printer_config.max_exposure_time.value;
+    double expt_min = m_printer_config.min_exposure_time.value;
+    double expt_cur = m_material_config.exposure_time.value;
+
+    if (expt_cur < expt_min || expt_cur > expt_max)
+        return { PrintBase::PrintValidationError::pveWrongSettings, _u8L("Exposition time is out of printer profile bounds.") };
+
+    double iexpt_max = m_printer_config.max_initial_exposure_time.value;
+    double iexpt_min = m_printer_config.min_initial_exposure_time.value;
+    double iexpt_cur = m_material_config.initial_exposure_time.value;
+
+    if (iexpt_cur < iexpt_min || iexpt_cur > iexpt_max)
+        return { PrintBase::PrintValidationError::pveWrongSettings, _u8L("Initial exposition time is out of printer profile bounds.") };
+
+    for (const std::string& prefix : { "", "branching" }) {
+
+        double head_penetration = m_full_print_config.opt_float(prefix + "support_head_penetration");
+        double head_width       = m_full_print_config.opt_float(prefix + "support_head_width");
+
+        if (head_penetration > head_width) {
+            return { PrintBase::PrintValidationError::pveWrongSettings, _u8L("Invalid Head penetration\n"
+                        "Head penetration should not be greater than the Head width.\n"
+                        "Please check value of Head penetration in Print Settings or Material Overrides.")};
+        }
+
+        double pinhead_d = m_full_print_config.opt_float(prefix + "support_head_front_diameter");
+        double pillar_d  = m_full_print_config.opt_float(prefix + "support_pillar_diameter");
+
+        if (pinhead_d > pillar_d) {
+            return { PrintBase::PrintValidationError::pveWrongSettings, _u8L("Invalid pinhead diameter\n"
+                        "Pinhead front diameter should be smaller than the Pillar diameter.\n"
+                        "Please check value of Pinhead front diameter in Print Settings or Material Overrides.")};
+        }
+    }
+
+    return { PrintBase::PrintValidationError::pveNone, "" };
 }
 
+void SLAPrint::export_print(const std::string &fname, const ThumbnailsList &thumbnails, const std::string &projectname)
+{
+    if (m_archiver)
+        m_archiver->export_print(fname, *this, thumbnails, projectname);
+    else {
+        throw ExportError(format(_u8L("Unknown archive format: %i"), int(m_printer_config.output_format)));
+    }
 }
 
-template<class...Args>
-void report_status(SLAPrint& p, int st, const std::string& msg, Args&&...args) {
-    BOOST_LOG_TRIVIAL(info) << st << "% " << msg;
-    p.set_status(st, msg, std::forward<Args>(args)...);
+bool SLAPrint::invalidate_step(SLAPrintStep step)
+{
+    bool invalidated = Inherited::invalidate_step(step);
+
+    // propagate to dependent steps
+    if (step == slapsMergeSlicesAndEval) {
+        invalidated |= this->invalidate_all_steps();
+    }
+
+    return invalidated;
 }
 
 void SLAPrint::process()
 {
-    using namespace sla;
-    using ExPolygon = Slic3r::ExPolygon;
+    if (m_objects.empty())
+        return;
+
+    name_tbb_thread_pool_threads_set_locale();
 
     // Assumption: at this point the print objects should be populated only with
     // the model objects we have to process and the instances are also filtered
+    
+    Steps printsteps(this);
 
-    // shortcut to initial layer height
-    double ilhd = m_material_config.initial_layer_height.getFloat();
-    auto   ilh  = float(ilhd);
-    const size_t objcount = m_objects.size();
-
-    const unsigned min_objstatus = 0;   // where the per object operations start
-    const unsigned max_objstatus = 80;  // where the per object operations end
-
-    // the coefficient that multiplies the per object status values which
-    // are set up for <0, 100>. They need to be scaled into the whole process
-    const double ostepd = (max_objstatus - min_objstatus) / (objcount * 100.0);
-
-    // The slicing will be performed on an imaginary 1D grid which starts from
-    // the bottom of the bounding box created around the supported model. So
-    // the first layer which is usually thicker will be part of the supports
-    // not the model geometry. Exception is when the model is not in the air
-    // (elevation is zero) and no pad creation was requested. In this case the
-    // model geometry starts on the ground level and the initial layer is part
-    // of it. In any case, the model and the supports have to be sliced in the
-    // same imaginary grid (the height vector argument to TriangleMeshSlicer).
-
-    // Slicing the model object. This method is oversimplified and needs to
-    // be compared with the fff slicing algorithm for verification
-    auto slice_model = [this, ilh](SLAPrintObject& po) {
-        double lh = po.m_config.layer_height.getFloat();
-
-        TriangleMesh mesh = po.transformed_mesh();
-        TriangleMeshSlicer slicer(&mesh);
-        auto bb3d = mesh.bounding_box();
-
-        double elevation = po.get_elevation();
-
-        float minZ = float(bb3d.min(Z)) - float(elevation);
-        float maxZ = float(bb3d.max(Z)) ;
-        auto flh = float(lh);
-        auto gnd = float(bb3d.min(Z));
-
-        // The 1D grid heights
-        std::vector<float> heights;
-
-        // The first layer (the one before the initial height) is added only
-        // if there is no pad and no elevation value
-        if(minZ >= gnd) heights.emplace_back(minZ);
-
-        for(float h = minZ + ilh; h < maxZ; h += flh)
-            if(h >= gnd) heights.emplace_back(h);
-
-        auto& layers = po.m_model_slices; layers.clear();
-        slicer.slice(heights, &layers, [this](){ throw_if_canceled(); });
+    // We want to first process all objects...
+    std::vector<SLAPrintObjectStep> level1_obj_steps = {
+        slaposAssembly, slaposHollowing, slaposDrillHoles, slaposObjectSlice, slaposSupportPoints, slaposSupportTree, slaposPad
     };
 
-    // this procedure simply converts the points and copies them into
-    // the support data cache
-    auto support_points = [](SLAPrintObject& po) {
-        ModelObject& mo = *po.m_model_object;
-        po.m_supportdata.reset(new SLAPrintObject::SupportData());
-
-        if(!mo.sla_support_points.empty()) {
-            po.m_supportdata->emesh = sla::to_eigenmesh(po.transformed_mesh());
-            po.m_supportdata->support_points =
-                    sla::to_point_set(po.transformed_support_points());
-        } else if(po.m_config.supports_enable.getBool()) {
-            // Supports are enabled but there are no support points to process.
-            // We throw here a runtime exception with some explanation and
-            // the background processing framework will handle it.
-            throw std::runtime_error(
-                L("Supports are enabled but no support points selected."
-                  " Hint: create some support points or disable support "
-                  "creation."));
-        }
+    // and then slice all supports to allow preview to be displayed ASAP
+    std::vector<SLAPrintObjectStep> level2_obj_steps = {
+        slaposSliceSupports
     };
 
-    // In this step we create the supports
-    auto support_tree = [this, objcount, ostepd](SLAPrintObject& po) {
-        if(!po.m_supportdata) return;
-
-        if(!po.m_config.supports_enable.getBool()) {
-            // Generate empty support tree. It can still host a pad
-            po.m_supportdata->support_tree_ptr.reset(new SLASupportTree());
-            return;
-        }
-
-        try {
-            sla::SupportConfig scfg = make_support_cfg(po.m_config);
-            sla::Controller ctl;
-
-            // some magic to scale the status values coming from the support
-            // tree creation into the whole print process
-            auto stfirst = OBJ_STEP_LEVELS.begin();
-            auto stthis = stfirst + slaposSupportTree;
-            // we need to add up the status portions until this operation
-            int init = std::accumulate(stfirst, stthis, 0);
-            init = int(init * ostepd);     // scale the init portion
-
-            // scaling for the sub operations
-            double d = *stthis / (objcount * 100.0);
-
-            ctl.statuscb = [this, init, d](unsigned st, const std::string& msg)
-            {
-                report_status(*this, int(init + st*d), msg);
-            };
-
-            ctl.stopcondition = [this](){ return canceled(); };
-            ctl.cancelfn = [this]() { throw_if_canceled(); };
-
-            po.m_supportdata->support_tree_ptr.reset(
-                        new SLASupportTree(po.m_supportdata->support_points,
-                                           po.m_supportdata->emesh, scfg, ctl));
-
-            // Create the unified mesh
-            auto rc = SlicingStatus::RELOAD_SCENE;
-            report_status(*this, -1, L("Visualizing supports"));
-            po.m_supportdata->support_tree_ptr->merged_mesh();
-            report_status(*this, -1, L("Visualizing supports"), rc);
-        } catch(sla::SLASupportsStoppedException&) {
-            // no need to rethrow
-            // throw_if_canceled();
-        }
-    };
-
-    // This step generates the sla base pad
-    auto base_pool = [this](SLAPrintObject& po) {
-        // this step can only go after the support tree has been created
-        // and before the supports had been sliced. (or the slicing has to be
-        // repeated)
-
-        if(po.m_config.pad_enable.getBool() &&
-           po.m_supportdata &&
-           po.m_supportdata->support_tree_ptr)
-        {
-            double wt = po.m_config.pad_wall_thickness.getFloat();
-            double h =  po.m_config.pad_wall_height.getFloat();
-            double md = po.m_config.pad_max_merge_distance.getFloat();
-            double er = po.m_config.pad_edge_radius.getFloat();
-            double lh = po.m_config.layer_height.getFloat();
-            double elevation = po.m_config.support_object_elevation.getFloat();
-            if(!po.m_config.supports_enable.getBool()) elevation = 0;
-            sla::PoolConfig pcfg(wt, h, md, er);
-
-            ExPolygons bp;
-            double pad_h = sla::get_pad_elevation(pcfg);
-            auto&& trmesh = po.transformed_mesh();
-
-            // This call can get pretty time consuming
-            auto thrfn = [this](){ throw_if_canceled(); };
-
-            if(elevation < pad_h)
-                sla::base_plate(trmesh, bp, float(pad_h), float(lh),
-                                            thrfn);
-
-            pcfg.throw_on_cancel = thrfn;
-            po.m_supportdata->support_tree_ptr->add_pad(bp, pcfg);
-        }
-
-        po.throw_if_canceled();
-        auto rc = SlicingStatus::RELOAD_SCENE;
-        report_status(*this, -1, L("Visualizing supports"), rc);
-    };
-
-    // Slicing the support geometries similarly to the model slicing procedure.
-    // If the pad had been added previously (see step "base_pool" than it will
-    // be part of the slices)
-    auto slice_supports = [ilh](SLAPrintObject& po) {
-        auto& sd = po.m_supportdata;
-        if(sd && sd->support_tree_ptr) {
-            auto lh = float(po.m_config.layer_height.getFloat());
-            sd->support_slices = sd->support_tree_ptr->slice(lh, ilh);
-        }
-    };
-
-    // We have the layer polygon collection but we need to unite them into
-    // an index where the key is the height level in discrete levels (clipper)
-    auto index_slices = [ilhd](SLAPrintObject& po) {
-        po.m_slice_index.clear();
-        auto sih = LevelID(scale_(ilhd));
-
-        // Establish the slice grid boundaries
-        auto bb = po.transformed_mesh().bounding_box();
-        double modelgnd = bb.min(Z);
-        double elevation = po.get_elevation();
-        double lh = po.m_config.layer_height.getFloat();
-        double minZ = modelgnd - elevation;
-
-        // scaled values:
-        auto sminZ = LevelID(scale_(minZ));
-        auto smaxZ = LevelID(scale_(bb.max(Z)));
-        auto smodelgnd = LevelID(scale_(modelgnd));
-        auto slh = LevelID(scale_(lh));
-
-        // It is important that the next levels match the levels in
-        // model_slice method. Only difference is that here it works with
-        // scaled coordinates
-        po.m_level_ids.clear();
-        if(sminZ >= smodelgnd) po.m_level_ids.emplace_back(sminZ);
-        for(LevelID h = sminZ + sih; h < smaxZ; h += slh)
-            if(h >= smodelgnd) po.m_level_ids.emplace_back(h);
-
-        std::vector<ExPolygons>& oslices = po.m_model_slices;
-
-        // If everything went well this code should not run at all, but
-        // let's be robust...
-        // assert(levelids.size() == oslices.size());
-        if(po.m_level_ids.size() < oslices.size()) { // extend the levels until...
-
-            BOOST_LOG_TRIVIAL(warning)
-                    << "Height level mismatch at rasterization!\n";
-
-            LevelID lastlvl = po.m_level_ids.back();
-            while(po.m_level_ids.size() < oslices.size()) {
-                lastlvl += slh;
-                po.m_level_ids.emplace_back(lastlvl);
-            }
-        }
-
-        for(size_t i = 0; i < oslices.size(); ++i) {
-            LevelID h = po.m_level_ids[i];
-
-            float fh = float(double(h) * SCALING_FACTOR);
-
-            // now for the public slice index:
-            SLAPrintObject::SliceRecord& sr = po.m_slice_index[fh];
-            // There should be only one slice layer for each print object
-            assert(sr.model_slices_idx == SLAPrintObject::SliceRecord::NONE);
-            sr.model_slices_idx = i;
-        }
-
-        if(po.m_supportdata) { // deal with the support slices if present
-            std::vector<ExPolygons>& sslices = po.m_supportdata->support_slices;
-            po.m_supportdata->level_ids.clear();
-            po.m_supportdata->level_ids.reserve(sslices.size());
-
-            for(int i = 0; i < int(sslices.size()); ++i) {
-                int a = i == 0 ? 0 : 1;
-                int b = i == 0 ? 0 : i - 1;
-                LevelID h = sminZ + a * sih + b * slh;
-                po.m_supportdata->level_ids.emplace_back(h);
-
-                float fh = float(double(h) * SCALING_FACTOR);
-
-                SLAPrintObject::SliceRecord& sr = po.m_slice_index[fh];
-                assert(sr.support_slices_idx == SLAPrintObject::SliceRecord::NONE);
-                sr.support_slices_idx = SLAPrintObject::SliceRecord::Idx(i);
-            }
-        }
-    };
-
-    // Rasterizing the model objects, and their supports
-    auto rasterize = [this, max_objstatus]() {
-        if(canceled()) return;
-
-        // clear the rasterizer input
-        m_printer_input.clear();
-
-        for(SLAPrintObject * o : m_objects) {
-            auto& po = *o;
-            std::vector<ExPolygons>& oslices = po.m_model_slices;
-
-            // We need to adjust the min Z level of the slices to be zero
-            LevelID smfirst =
-                    po.m_supportdata && !po.m_supportdata->level_ids.empty() ?
-                        po.m_supportdata->level_ids.front() : 0;
-            LevelID mfirst = po.m_level_ids.empty()? 0 : po.m_level_ids.front();
-            LevelID gndlvl = -(std::min(smfirst, mfirst));
-
-            // now merge this object's support and object slices with the rest
-            // of the print object slices
-
-            for(size_t i = 0; i < oslices.size(); ++i) {
-                auto& lyrs = m_printer_input[gndlvl + po.m_level_ids[i]];
-                lyrs.emplace_back(oslices[i], po.m_instances);
-            }
-
-            if(!po.m_supportdata) continue;
-            std::vector<ExPolygons>& sslices = po.m_supportdata->support_slices;
-            for(size_t i = 0; i < sslices.size(); ++i) {
-                LayerRefs& lyrs =
-                       m_printer_input[gndlvl + po.m_supportdata->level_ids[i]];
-                lyrs.emplace_back(sslices[i], po.m_instances);
-            }
-        }
-
-        // collect all the keys
-        std::vector<long long> keys; keys.reserve(m_printer_input.size());
-        for(auto& e : m_printer_input) keys.emplace_back(e.first);
-
-        // If the raster has vertical orientation, we will flip the coordinates
-        bool flpXY = m_printer_config.display_orientation.getInt() ==
-                SLADisplayOrientation::sladoPortrait;
-
-        { // create a raster printer for the current print parameters
-            // I don't know any better
-            auto& ocfg = m_objects.front()->m_config;
-            auto& matcfg = m_material_config;
-            auto& printcfg = m_printer_config;
-
-            double w = printcfg.display_width.getFloat();
-            double h = printcfg.display_height.getFloat();
-            auto pw = unsigned(printcfg.display_pixels_x.getInt());
-            auto ph = unsigned(printcfg.display_pixels_y.getInt());
-            double lh = ocfg.layer_height.getFloat();
-            double exp_t = matcfg.exposure_time.getFloat();
-            double iexp_t = matcfg.initial_exposure_time.getFloat();
-
-            if(flpXY) { std::swap(w, h); std::swap(pw, ph); }
-
-            m_printer.reset(new SLAPrinter(w, h, pw, ph, lh, exp_t, iexp_t,
-                                           flpXY? SLAPrinter::RO_PORTRAIT :
-                                                  SLAPrinter::RO_LANDSCAPE));
-        }
-
-        // Allocate space for all the layers
-        SLAPrinter& printer = *m_printer;
-        auto lvlcnt = unsigned(m_printer_input.size());
-        printer.layers(lvlcnt);
-
-        // slot is the portion of 100% that is realted to rasterization
-        unsigned slot = PRINT_STEP_LEVELS[slapsRasterize];
-        // ist: initial state; pst: previous state
-        unsigned ist = max_objstatus, pst = ist;
-        // coefficient to map the rasterization state (0-99) to the allocated
-        // portion (slot) of the process state
-        double sd = (100 - ist) / 100.0;
-        SpinMutex slck;
-
-        // procedure to process one height level. This will run in parallel
-        auto lvlfn =
-        [this, &slck, &keys, &printer, slot, sd, ist, &pst, flpXY]
-            (unsigned level_id)
-        {
-            if(canceled()) return;
-
-            LayerRefs& lrange = m_printer_input[keys[level_id]];
-
-            // Switch to the appropriate layer in the printer
-            printer.begin_layer(level_id);
-
-            for(auto& lyrref : lrange) { // for all layers in the current level
-                if(canceled()) break;
-                const Layer& sl = lyrref.lref;   // get the layer reference
-                const LayerCopies& copies = lyrref.copies;
-
-                // Draw all the polygons in the slice to the actual layer.
-                for(auto& cp : copies) {
-                    for(ExPolygon slice : sl) {
-                        // The order is important here:
-                        // apply rotation before translation...
-                        slice.rotate(double(cp.rotation));
-                        slice.translate(cp.shift(X), cp.shift(Y));
-                        if(flpXY) swapXY(slice);
-                        printer.draw_polygon(slice, level_id);
-                    }
-                }
-            }
-
-            // Finish the layer for later saving it.
-            printer.finish_layer(level_id);
-
-            // Status indication guarded with the spinlock
-            auto st = ist + unsigned(sd*level_id*slot/m_printer_input.size());
-            { std::lock_guard<SpinMutex> lck(slck);
-            if( st > pst) {
-                report_status(*this, int(st), PRINT_STEP_LABELS[slapsRasterize]);
-                pst = st;
-            }
-            }
-        };
-
-        // last minute escape
-        if(canceled()) return;
-
-        // Sequential version (for testing)
-        // for(unsigned l = 0; l < lvlcnt; ++l) process_level(l);
-
-        // Print all the layers in parallel
-        tbb::parallel_for<unsigned, decltype(lvlfn)>(0, lvlcnt, lvlfn);
-    };
-
-    using slaposFn = std::function<void(SLAPrintObject&)>;
-    using slapsFn  = std::function<void(void)>;
-
-    // This is the actual order of steps done on each PrintObject
-    std::array<SLAPrintObjectStep, slaposCount> objectsteps = {
-        slaposObjectSlice,      // Support Islands will need this step
-        slaposSupportIslands,
-        slaposSupportPoints,
-        slaposSupportTree,
-        slaposBasePool,
-        slaposSliceSupports,
-        slaposIndexSlices
-    };
-
-    std::array<slaposFn, slaposCount> pobj_program =
-    {
-        slice_model,
-        [](SLAPrintObject&){}, // slaposSupportIslands now empty
-        support_points,
-        support_tree,
-        base_pool,
-        slice_supports,
-        index_slices
-    };
-
-    std::array<slapsFn, slapsCount> print_program =
-    {
-        rasterize,
-        [](){}  // validate
-    };
-
-    unsigned st = min_objstatus;
-    unsigned incr = 0;
+    SLAPrintStep print_steps[] = { slapsMergeSlicesAndEval, slapsRasterize };
+    
+    double st = Steps::min_objstatus;
 
     BOOST_LOG_TRIVIAL(info) << "Start slicing process.";
 
-    // TODO: this loop could run in parallel but should not exhaust all the CPU
-    // power available
-    for(SLAPrintObject * po : m_objects) {
+#ifdef SLAPRINT_DO_BENCHMARK
+    Benchmark bench;
+#else
+    struct {
+        void start() {} void stop() {} double getElapsedSec() { return .0; }
+    } bench;
+#endif
 
-        BOOST_LOG_TRIVIAL(info) << "Slicing object " << po->model_object()->name;
+    std::array<double, slaposCount + slapsCount> step_times {};
 
-        for(size_t s = 0; s < objectsteps.size(); ++s) {
-            auto currentstep = objectsteps[s];
+    auto apply_steps_on_objects =
+        [this, &st, &printsteps, &step_times, &bench]
+        (const std::vector<SLAPrintObjectStep> &steps)
+    {
+        double incr = 0;
+        for (SLAPrintObject *po : m_objects) {
+            for (SLAPrintObjectStep step : steps) {
 
-            // Cancellation checking. Each step will check for cancellation
-            // on its own and return earlier gracefully. Just after it returns
-            // execution gets to this point and throws the canceled signal.
-            throw_if_canceled();
+                // Cancellation checking. Each step will check for
+                // cancellation on its own and return earlier gracefully.
+                // Just after it returns execution gets to this point and
+                // throws the canceled signal.
+                throw_if_canceled();
 
-            st += unsigned(incr * ostepd);
+                st += incr;
 
-            if(po->m_stepmask[currentstep] && po->set_started(currentstep)) {
-                report_status(*this, int(st), OBJ_STEP_LABELS[currentstep]);
-                pobj_program[currentstep](*po);
-                po->set_done(currentstep);
+                if (po->set_started(step)) {
+                    m_report_status(*this, st, printsteps.label(step));
+                    bench.start();
+                    printsteps.execute(step, *po);
+                    bench.stop();
+                    step_times[step] += bench.getElapsedSec();
+                    throw_if_canceled();
+                    po->set_done(step);
+                }
+                
+                incr = printsteps.progressrange(step);
             }
-
-            incr = OBJ_STEP_LEVELS[currentstep];
         }
-    }
-
-    std::array<SLAPrintStep, slapsCount> printsteps = {
-        slapsRasterize, slapsValidate
     };
 
-    // this would disable the rasterization step
-//    m_stepmask[slapsRasterize] = false;
+    apply_steps_on_objects(level1_obj_steps);
+    apply_steps_on_objects(level2_obj_steps);
 
-    double pstd = (100 - max_objstatus) / 100.0;
-    st = max_objstatus;
-    for(size_t s = 0; s < print_program.size(); ++s) {
-        auto currentstep = printsteps[s];
-
+    st = Steps::max_objstatus;
+    for(SLAPrintStep currentstep : print_steps) {
         throw_if_canceled();
 
-        if(m_stepmask[currentstep] && set_started(currentstep))
-        {
-            report_status(*this, int(st), PRINT_STEP_LABELS[currentstep]);
-            print_program[currentstep]();
+        if (set_started(currentstep)) {
+            m_report_status(*this, st, printsteps.label(currentstep));
+            bench.start();
+            printsteps.execute(currentstep);
+            bench.stop();
+            step_times[slaposCount + currentstep] += bench.getElapsedSec();
+            throw_if_canceled();
             set_done(currentstep);
         }
-
-        st += unsigned(PRINT_STEP_LEVELS[currentstep] * pstd);
+        
+        st += printsteps.progressrange(currentstep);
     }
 
     // If everything vent well
-    report_status(*this, 100, L("Slicing done"));
+    m_report_status(*this, 100, _u8L("Slicing done"));
+
+#ifdef SLAPRINT_DO_BENCHMARK
+    std::string csvbenchstr;
+    for (size_t i = 0; i < size_t(slaposCount); ++i)
+        csvbenchstr += printsteps.label(SLAPrintObjectStep(i)) + ";";
+
+    for (size_t i = 0; i < size_t(slapsCount); ++i)
+        csvbenchstr += printsteps.label(SLAPrintStep(i)) + ";";
+
+    csvbenchstr += "\n";
+    for (double t : step_times) csvbenchstr += std::to_string(t) + ";";
+
+    std::cout << "Performance stats: \n" << csvbenchstr << std::endl;
+#endif
+
 }
 
-bool SLAPrint::invalidate_state_by_config_options(const std::vector<t_config_option_key> &opt_keys)
+bool SLAPrint::invalidate_state_by_config_options(const std::vector<t_config_option_key> &opt_keys, bool &invalidate_all_model_objects)
 {
+    using namespace std::string_view_literals;
+
     if (opt_keys.empty())
         return false;
 
-    // Cache the plenty of parameters, which influence the final rasterization only,
-    // or they are only notes not influencing the rasterization step.
-    static std::unordered_set<std::string> steps_rasterize = {
-        "exposure_time",
-        "initial_exposure_time",
-        "material_correction_printing",
-        "material_correction_curing",
-        "display_width",
-        "display_height",
-        "display_pixels_x",
-        "display_pixels_y",
-        "display_orientation",
-        "printer_correction"
+    static constexpr StaticSet steps_full = {
+        "initial_layer_height"sv,
+        "material_correction"sv,
+        "material_correction_x"sv,
+        "material_correction_y"sv,
+        "material_correction_z"sv,
+        "material_print_speed"sv,
+        "relative_correction"sv,
+        "relative_correction_x"sv,
+        "relative_correction_y"sv,
+        "relative_correction_z"sv,
+        "absolute_correction"sv,
+        "first_layer_size_compensation"sv,
+        "elefant_foot_min_width"sv,
+        "gamma_correction"sv,
     };
 
-    static std::unordered_set<std::string> steps_ignore = {
-        "bed_shape",
-        "max_print_height",
-        "printer_technology",
-        "output_filename_format"
+    // Cache the plenty of parameters, which influence the final rasterization only,
+    // or they are only notes not influencing the rasterization step.
+    static constexpr StaticSet steps_rasterize = {
+        "min_exposure_time"sv,
+        "max_exposure_time"sv,
+        "exposure_time"sv,
+        "min_initial_exposure_time"sv,
+        "max_initial_exposure_time"sv,
+        "initial_exposure_time"sv,
+        "display_width"sv,
+        "display_height"sv,
+        "display_pixels_x"sv,
+        "display_pixels_y"sv,
+        "display_mirror_x"sv,
+        "display_mirror_y"sv,
+        "display_orientation"sv,
+        "output_format"sv,
+        "sla_output_precision"sv
+    };
+
+    static StaticSet steps_ignore = {
+        "bed_shape"sv,
+        "max_print_height"sv,
+        "printer_technology"sv,
+        "output_filename_format"sv,
+        "fast_tilt_time"sv,
+        "slow_tilt_time"sv,
+        "high_viscosity_tilt_time"sv,
+        "area_fill"sv,
+        "bottle_cost"sv,
+        "bottle_volume"sv,
+        "bottle_weight"sv,
+        "material_density"sv,
+        "material_ow_support_pillar_diameter"sv,
+        "material_ow_support_head_front_diameter"sv,
+        "material_ow_support_head_penetration"sv,
+        "material_ow_support_head_width"sv,
+        "material_ow_branchingsupport_pillar_diameter"sv,
+        "material_ow_branchingsupport_head_front_diameter"sv,
+        "material_ow_branchingsupport_head_penetration"sv,
+        "material_ow_branchingsupport_head_width"sv,
+        "material_ow_first_layer_size_compensation"sv,
+        "material_ow_support_points_density_relative"sv,
+        "material_ow_relative_correction_x"sv,
+        "material_ow_relative_correction_y"sv,
+        "material_ow_relative_correction_z"sv,
+        "thumbnails"sv,
+        "thumbnails_color"sv,
+        "thumbnails_custom_color"sv,
+        "thumbnails_end_file"sv,
+        "thumbnails_tag_format"sv,
+        "thumbnails_with_bed"sv,
+        "thumbnails_with_support"sv
     };
 
     std::vector<SLAPrintStep> steps;
     std::vector<SLAPrintObjectStep> osteps;
     bool invalidated = false;
 
-    for (const t_config_option_key &opt_key : opt_keys) {
+    for (std::string_view opt_key : opt_keys) {
         if (steps_rasterize.find(opt_key) != steps_rasterize.end()) {
             // These options only affect the final rasterization, or they are just notes without influence on the output,
             // so there is nothing to invalidate.
-            steps.emplace_back(slapsRasterize);
+            steps.emplace_back(slapsMergeSlicesAndEval);
         } else if (steps_ignore.find(opt_key) != steps_ignore.end()) {
             // These steps have no influence on the output. Just ignore them.
-        } else if (opt_key == "initial_layer_height") {
-            steps.emplace_back(slapsRasterize);
+        } else if (steps_full.find(opt_key) != steps_full.end()) {
+            steps.emplace_back(slapsMergeSlicesAndEval);
             osteps.emplace_back(slaposObjectSlice);
+            invalidate_all_model_objects = true;
         } else {
             // All values should be covered.
             assert(false);
@@ -963,25 +930,20 @@ bool SLAPrint::is_step_done(SLAPrintObjectStep step) const
 {
     if (m_objects.empty())
         return false;
-    tbb::mutex::scoped_lock lock(this->state_mutex());
+    std::scoped_lock<std::mutex> lock(this->state_mutex());
     for (const SLAPrintObject *object : m_objects)
-        if (! object->m_state.is_done_unguarded(step))
+        if (! object->is_step_done_unguarded(step))
             return false;
     return true;
 }
 
-SLAPrintObject::SLAPrintObject(SLAPrint *print, ModelObject *model_object):
-    Inherited(print, model_object),
-    m_stepmask(slaposCount, true),
-    m_transformed_rmesh( [this](TriangleMesh& obj){
-            obj = m_model_object->raw_mesh(); obj.transform(m_trafo);
-        })
-{
-}
+SLAPrintObject::SLAPrintObject(SLAPrint *print, ModelObject *model_object)
+    : Inherited(print, model_object)
+{}
 
 SLAPrintObject::~SLAPrintObject() {}
 
-// Called by SLAPrint::apply_config().
+// Called by SLAPrint::apply().
 // This method only accepts SLAPrintObjectConfig option keys.
 bool SLAPrintObject::invalidate_state_by_config_options(const std::vector<t_config_option_key> &opt_keys)
 {
@@ -991,28 +953,79 @@ bool SLAPrintObject::invalidate_state_by_config_options(const std::vector<t_conf
     std::vector<SLAPrintObjectStep> steps;
     bool invalidated = false;
     for (const t_config_option_key &opt_key : opt_keys) {
-		if (opt_key == "layer_height") {
-			steps.emplace_back(slaposObjectSlice);
-        } else if (opt_key == "supports_enable") {
+        if (   opt_key == "hollowing_enable"
+            || opt_key == "hollowing_min_thickness"
+            || opt_key == "hollowing_quality"
+            || opt_key == "hollowing_closing_distance"
+            ) {
+            steps.emplace_back(slaposHollowing);
+        } else if (
+               opt_key == "layer_height"
+            || opt_key == "faded_layers"
+            || opt_key == "pad_enable"
+            || opt_key == "pad_wall_thickness"
+            || opt_key == "supports_enable"
+            || opt_key == "support_tree_type"
+            || opt_key == "support_object_elevation"
+            || opt_key == "branchingsupport_object_elevation"
+            || opt_key == "pad_around_object"
+            || opt_key == "pad_around_object_everywhere"
+            || opt_key == "slice_closing_radius"
+            || opt_key == "slicing_mode") {
+            steps.emplace_back(slaposObjectSlice);
+        } else if (
+               opt_key == "support_points_density_relative"
+            || opt_key == "support_enforcers_only"
+            || opt_key == "support_points_minimal_distance"
+            ) {
             steps.emplace_back(slaposSupportPoints);
-		} else if (
+        } else if (
                opt_key == "support_head_front_diameter"
             || opt_key == "support_head_penetration"
             || opt_key == "support_head_width"
             || opt_key == "support_pillar_diameter"
+            || opt_key == "support_pillar_widening_factor"
+            || opt_key == "support_small_pillar_diameter_percent"
+            || opt_key == "support_max_weight_on_model"
+            || opt_key == "support_max_bridges_on_pillar"
+            || opt_key == "support_pillar_connection_mode"
+            || opt_key == "support_buildplate_only"
             || opt_key == "support_base_diameter"
             || opt_key == "support_base_height"
             || opt_key == "support_critical_angle"
             || opt_key == "support_max_bridge_length"
-            || opt_key == "support_object_elevation") {
+            || opt_key == "support_max_pillar_link_distance"
+            || opt_key == "support_base_safety_distance"
+            || opt_key == "branchingsupport_head_front_diameter"
+            || opt_key == "branchingsupport_head_penetration"
+            || opt_key == "branchingsupport_head_width"
+            || opt_key == "branchingsupport_pillar_diameter"
+            || opt_key == "branchingsupport_pillar_widening_factor"
+            || opt_key == "branchingsupport_small_pillar_diameter_percent"
+            || opt_key == "branchingsupport_max_weight_on_model"
+            || opt_key == "branchingsupport_max_bridges_on_pillar"
+            || opt_key == "branchingsupport_pillar_connection_mode"
+            || opt_key == "branchingsupport_buildplate_only"
+            || opt_key == "branchingsupport_base_diameter"
+            || opt_key == "branchingsupport_base_height"
+            || opt_key == "branchingsupport_critical_angle"
+            || opt_key == "branchingsupport_max_bridge_length"
+            || opt_key == "branchingsupport_max_pillar_link_distance"
+            || opt_key == "branchingsupport_base_safety_distance"
+            || opt_key == "pad_object_gap"
+            ) {
             steps.emplace_back(slaposSupportTree);
         } else if (
-               opt_key == "pad_enable"
-            || opt_key == "pad_wall_thickness"
-            || opt_key == "pad_wall_height"
+               opt_key == "pad_wall_height"
+            || opt_key == "pad_brim_size"
             || opt_key == "pad_max_merge_distance"
-            || opt_key == "pad_edge_radius") {
-            steps.emplace_back(slaposBasePool);
+            || opt_key == "pad_wall_slope"
+            || opt_key == "pad_edge_radius"
+            || opt_key == "pad_object_connector_stride"
+            || opt_key == "pad_object_connector_width"
+            || opt_key == "pad_object_connector_penetration"
+            ) {
+            steps.emplace_back(slaposPad);
         } else {
             // All keys should be covered.
             assert(false);
@@ -1029,50 +1042,50 @@ bool SLAPrintObject::invalidate_step(SLAPrintObjectStep step)
 {
     bool invalidated = Inherited::invalidate_step(step);
     // propagate to dependent steps
-    if (step == slaposObjectSlice) {
+    if (step == slaposAssembly) {
         invalidated |= this->invalidate_all_steps();
-    } else if (step == slaposSupportIslands) {
-        invalidated |= this->invalidate_steps({ slaposSupportPoints, slaposSupportTree, slaposBasePool, slaposSliceSupports, slaposIndexSlices });
-        invalidated |= m_print->invalidate_step(slapsRasterize);
+    } else if (step == slaposHollowing) {
+        invalidated |= invalidated |= this->invalidate_steps({ slaposDrillHoles, slaposObjectSlice, slaposSupportPoints, slaposSupportTree, slaposPad, slaposSliceSupports });
+    } else if (step == slaposDrillHoles) {
+        invalidated |= this->invalidate_steps({ slaposObjectSlice, slaposSupportPoints, slaposSupportTree, slaposPad, slaposSliceSupports });
+        invalidated |= m_print->invalidate_step(slapsMergeSlicesAndEval);
+    } else if (step == slaposObjectSlice) {
+        invalidated |= this->invalidate_steps({ slaposSupportPoints, slaposSupportTree, slaposPad, slaposSliceSupports });
+        invalidated |= m_print->invalidate_step(slapsMergeSlicesAndEval);
     } else if (step == slaposSupportPoints) {
-        invalidated |= this->invalidate_steps({ slaposSupportTree, slaposBasePool, slaposSliceSupports, slaposIndexSlices });
-        invalidated |= m_print->invalidate_step(slapsRasterize);
+        invalidated |= this->invalidate_steps({ slaposSupportTree, slaposPad, slaposSliceSupports });
+        invalidated |= m_print->invalidate_step(slapsMergeSlicesAndEval);
     } else if (step == slaposSupportTree) {
-        invalidated |= this->invalidate_steps({ slaposBasePool, slaposSliceSupports, slaposIndexSlices });
-        invalidated |= m_print->invalidate_step(slapsRasterize);
-    } else if (step == slaposBasePool) {
-        invalidated |= this->invalidate_steps({slaposSliceSupports, slaposIndexSlices});
-        invalidated |= m_print->invalidate_step(slapsRasterize);
+        invalidated |= this->invalidate_steps({ slaposPad, slaposSliceSupports });
+        invalidated |= m_print->invalidate_step(slapsMergeSlicesAndEval);
+    } else if (step == slaposPad) {
+        invalidated |= this->invalidate_steps({slaposSliceSupports});
+        invalidated |= m_print->invalidate_step(slapsMergeSlicesAndEval);
     } else if (step == slaposSliceSupports) {
-        invalidated |= this->invalidate_step(slaposIndexSlices);
-        invalidated |= m_print->invalidate_step(slapsRasterize);
-    } else if(step == slaposIndexSlices) {
-        invalidated |= m_print->invalidate_step(slapsRasterize);
+        invalidated |= m_print->invalidate_step(slapsMergeSlicesAndEval);
     }
     return invalidated;
 }
 
 bool SLAPrintObject::invalidate_all_steps()
 {
-    return Inherited::invalidate_all_steps() | m_print->invalidate_all_steps();
+    return Inherited::invalidate_all_steps() || m_print->invalidate_all_steps();
 }
 
 double SLAPrintObject::get_elevation() const {
-    bool se = m_config.supports_enable.getBool();
-    double ret = se? m_config.support_object_elevation.getFloat() : 0;
+    if (is_zero_elevation(m_config)) return 0.;
 
-    // if the pad is enabled, then half of the pad height is its base plate
-    if(m_config.pad_enable.getBool()) {
+    bool en = m_config.supports_enable.value;
+
+    double ret = en ? m_config.support_object_elevation.value : 0.;
+
+    if(m_config.pad_enable.value) {
         // Normally the elevation for the pad itself would be the thickness of
         // its walls but currently it is half of its thickness. Whatever it
         // will be in the future, we provide the config to the get_pad_elevation
         // method and we will have the correct value
-        sla::PoolConfig pcfg;
-        pcfg.min_wall_height_mm = m_config.pad_wall_height.getFloat();
-        pcfg.min_wall_thickness_mm = m_config.pad_wall_thickness.getFloat();
-        pcfg.edge_radius_mm = m_config.pad_edge_radius.getFloat();
-        pcfg.max_merge_distance_mm = m_config.pad_max_merge_distance.getFloat();
-        ret += sla::get_pad_elevation(pcfg);
+        sla::PadConfig pcfg = make_pad_cfg(m_config);
+        if(!pcfg.embed_object) ret += pcfg.required_elevation();
     }
 
     return ret;
@@ -1080,20 +1093,52 @@ double SLAPrintObject::get_elevation() const {
 
 double SLAPrintObject::get_current_elevation() const
 {
-    bool se = m_config.supports_enable.getBool();
-    bool has_supports = is_step_done(slaposSupportTree);
-    bool has_pad = is_step_done(slaposBasePool);
-    if(!has_supports && !has_pad) return 0;
-    else if(has_supports && !has_pad)
-        return se ? m_config.support_object_elevation.getFloat() : 0;
-    else return get_elevation();
+    if (is_zero_elevation(m_config)) return 0.;
 
-    return 0;
+    bool has_supports = is_step_done(slaposSupportTree);
+    bool has_pad      = is_step_done(slaposPad);
+
+    if(!has_supports && !has_pad)
+        return 0;
+    else if(has_supports && !has_pad) {
+        return m_config.support_object_elevation.value;
+    }
+
+    return get_elevation();
+}
+
+Vec3d SLAPrint::relative_correction() const
+{
+    Vec3d corr(1., 1., 1.);
+
+    if(printer_config().relative_correction.size() >= 2) {
+        corr.x() = printer_config().relative_correction_x.value;
+        corr.y() = printer_config().relative_correction_y.value;
+        corr.z() = printer_config().relative_correction_z.value;
+    }
+
+    if(material_config().material_correction.size() >= 2) {
+        corr.x() *= material_config().material_correction_x.value;
+        corr.y() *= material_config().material_correction_y.value;
+        corr.z() *= material_config().material_correction_z.value;
+    }
+
+    return corr;
 }
 
 namespace { // dummy empty static containers for return values in some methods
 const std::vector<ExPolygons> EMPTY_SLICES;
 const TriangleMesh EMPTY_MESH;
+const indexed_triangle_set EMPTY_TRIANGLE_SET;
+const ExPolygons EMPTY_SLICE;
+const std::vector<sla::SupportPoint> EMPTY_SUPPORT_POINTS;
+}
+
+const SliceRecord SliceRecord::EMPTY(0, std::nanf(""), 0.f);
+
+const std::vector<sla::SupportPoint>& SLAPrintObject::get_support_points() const
+{
+    return m_supportdata? m_supportdata->input.pts : EMPTY_SUPPORT_POINTS;
 }
 
 const std::vector<ExPolygons> &SLAPrintObject::get_support_slices() const
@@ -1103,84 +1148,150 @@ const std::vector<ExPolygons> &SLAPrintObject::get_support_slices() const
     return m_supportdata->support_slices;
 }
 
-const SLAPrintObject::SliceIndex &SLAPrintObject::get_slice_index() const
+const ExPolygons &SliceRecord::get_slice(SliceOrigin o) const
 {
-    // assert(is_step_done(slaposIndexSlices));
-    return m_slice_index;
-}
+    size_t idx = o == soModel ? m_model_slices_idx : m_support_slices_idx;
 
-const std::vector<ExPolygons> &SLAPrintObject::get_model_slices() const
-{
-    // assert(is_step_done(slaposObjectSlice));
-    return m_model_slices;
-}
+    if(m_po == nullptr) return EMPTY_SLICE;
 
-bool SLAPrintObject::has_mesh(SLAPrintObjectStep step) const
-{
-    switch (step) {
-    case slaposSupportTree:
-        return ! this->support_mesh().empty();
-    case slaposBasePool:
-        return ! this->pad_mesh().empty();
-    default:
-        return false;
-    }
-}
+    const std::vector<ExPolygons>& v = o == soModel? m_po->get_model_slices() :
+                                                     m_po->get_support_slices();
 
-TriangleMesh SLAPrintObject::get_mesh(SLAPrintObjectStep step) const
-{
-    switch (step) {
-    case slaposSupportTree:
-        return this->support_mesh();
-    case slaposBasePool:
-        return this->pad_mesh();
-    default:
-        return TriangleMesh();
-    }
+    return idx >= v.size() ? EMPTY_SLICE : v[idx];
 }
 
 const TriangleMesh& SLAPrintObject::support_mesh() const
 {
-    if(m_config.supports_enable.getBool() && m_supportdata &&
-       m_supportdata->support_tree_ptr) {
-        return m_supportdata->support_tree_ptr->merged_mesh();
-    }
+    if (m_config.supports_enable.value &&
+        is_step_done(slaposSupportTree) &&
+        m_supportdata)
+        return m_supportdata->tree_mesh;
 
     return EMPTY_MESH;
 }
 
 const TriangleMesh& SLAPrintObject::pad_mesh() const
 {
-    if(m_config.pad_enable.getBool() && m_supportdata && m_supportdata->support_tree_ptr)
-        return m_supportdata->support_tree_ptr->get_pad();
+    if(m_config.pad_enable.value && is_step_done(slaposPad) && m_supportdata)
+        return m_supportdata->pad_mesh;
 
     return EMPTY_MESH;
 }
 
-const TriangleMesh &SLAPrintObject::transformed_mesh() const {
-    // we need to transform the raw mesh...
-    // currently all the instances share the same x and y rotation and scaling
-    // so we have to extract those from e.g. the first instance and apply to the
-    // raw mesh. This is also true for the support points.
-    // BUT: when the support structure is spawned for each instance than it has
-    // to omit the X, Y rotation and scaling as those have been already applied
-    // or apply an inverse transformation on the support structure after it
-    // has been created.
+const std::shared_ptr<const indexed_triangle_set> &
+SLAPrintObject::get_mesh_to_print() const
+{
+    int s = last_completed_step();
 
-    return m_transformed_rmesh.get();
+    while (s > 0 && ! m_preview_meshes[s])
+        --s;
+
+    return m_preview_meshes[s];
 }
 
-std::vector<Vec3d> SLAPrintObject::transformed_support_points() const
+std::vector<csg::CSGPart> SLAPrintObject::get_parts_to_slice() const
 {
-    assert(m_model_object != nullptr);
-    auto& spts = m_model_object->sla_support_points;
+    return get_parts_to_slice(slaposCount);
+}
 
-    // this could be cached as well
-    std::vector<Vec3d> ret; ret.reserve(spts.size());
+std::vector<csg::CSGPart>
+SLAPrintObject::get_parts_to_slice(SLAPrintObjectStep untilstep) const
+{
+    auto laststep = last_completed_step();
+    SLAPrintObjectStep s = std::min(untilstep, laststep);
 
-    for(auto& sp : spts) ret.emplace_back( trafo() * Vec3d(sp.cast<double>()));
+    if (s == slaposCount)
+        return {};
+
+    std::vector<csg::CSGPart> ret;
+
+    for (unsigned int step = 0; step < s; ++step) {
+        auto r = m_mesh_to_slice.equal_range(SLAPrintObjectStep(step));
+        csg::copy_csgrange_shallow(Range{r.first, r.second}, std::back_inserter(ret));
+    }
 
     return ret;
 }
+
+sla::SupportPoints SLAPrintObject::transformed_support_points() const
+{
+    assert(model_object());
+
+    return sla::transformed_support_points(*model_object(), trafo());
+}
+
+sla::DrainHoles SLAPrintObject::transformed_drainhole_points() const
+{
+    assert(model_object());
+
+    return sla::transformed_drainhole_points(*model_object(), trafo());
+}
+
+DynamicConfig SLAPrintStatistics::config() const
+{
+    DynamicConfig config;
+    const std::string print_time = Slic3r::short_time(get_time_dhms(float(this->estimated_print_time)));
+    config.set_key_value("print_time", new ConfigOptionString(print_time));
+    config.set_key_value("objects_used_material", new ConfigOptionFloat(this->objects_used_material));
+    config.set_key_value("support_used_material", new ConfigOptionFloat(this->support_used_material));
+    config.set_key_value("total_cost", new ConfigOptionFloat(this->total_cost));
+    config.set_key_value("total_weight", new ConfigOptionFloat(this->total_weight));
+    return config;
+}
+
+DynamicConfig SLAPrintStatistics::placeholders()
+{
+    DynamicConfig config;
+    for (const char *key : {
+        "print_time", "total_cost", "total_weight",
+        "objects_used_material", "support_used_material" })
+        config.set_key_value(key, new ConfigOptionString(std::string("{") + key + "}"));
+
+    return config;
+}
+
+std::string SLAPrintStatistics::finalize_output_path(const std::string &path_in) const
+{
+    std::string final_path;
+    try {
+        boost::filesystem::path path(path_in);
+        DynamicConfig cfg = this->config();
+        PlaceholderParser pp;
+        std::string new_stem = pp.process(path.stem().string(), 0, &cfg);
+        final_path = (path.parent_path() / (new_stem + path.extension().string())).string();
+    }
+    catch (const std::exception &ex) {
+        BOOST_LOG_TRIVIAL(error) << "Failed to apply the print statistics to the export file name: " << ex.what();
+        final_path = path_in;
+    }
+    return final_path;
+}
+
+void SLAPrint::StatusReporter::operator()(SLAPrint &         p,
+                                          double             st,
+                                          const std::string &msg,
+                                          uint16_t           flags,
+                                          const std::string &logmsg)
+{
+    m_st = st;
+    BOOST_LOG_TRIVIAL(info)
+        << st << "% " << msg << (logmsg.empty() ? "" : ": ") << logmsg
+        << log_memory_info();
+
+    p.set_status(int(std::round(st)), msg, flags);
+}
+
+namespace csg {
+
+MeshBoolean::cgal::CGALMeshPtr get_cgalmesh(const CSGPartForStep &part)
+{
+    if (!part.cgalcache && csg::get_mesh(part)) {
+        part.cgalcache = csg::get_cgalmesh(static_cast<const csg::CSGPart&>(part));
+    }
+
+    return part.cgalcache? clone(*part.cgalcache) : nullptr;
+}
+
+} // namespace csg
 
 } // namespace Slic3r

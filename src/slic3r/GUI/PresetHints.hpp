@@ -1,9 +1,13 @@
+///|/ Copyright (c) Prusa Research 2017 - 2020 Oleksandra Iushchenko @YuSanka, Vojtěch Bubník @bubnikv
+///|/
+///|/ PrusaSlicer is released under the terms of the AGPLv3 or higher
+///|/
 #ifndef slic3r_PresetHints_hpp_
 #define slic3r_PresetHints_hpp_
 
 #include <string>
 
-#include "PresetBundle.hpp"
+#include "libslic3r/PresetBundle.hpp"
 
 namespace Slic3r {
 
@@ -12,7 +16,7 @@ class PresetHints
 {
 public:
     // Produce a textual description of the cooling logic of a currently active filament.
-    static std::string cooling_description(const Preset &preset);
+    static std::string cooling_description(const Preset &preset_filament, const Preset& preset_printer);
     
     // Produce a textual description of the maximum flow achived for the current configuration
     // (the current printer, filament and print settigns).
@@ -22,7 +26,16 @@ public:
 
     // Produce a textual description of a recommended thin wall thickness
     // from the provided number of perimeters and the external / internal perimeter width.
-    static std::string recommended_thin_wall_thickness(const PresetBundle &preset_bundle);
+    static std::string recommended_thin_wall_thickness(const PresetBundle& preset_bundle);
+
+    // Produce a textual description of a recommended extrusion width
+    // from the provided layer height
+    static std::string recommended_extrusion_width(const PresetBundle& preset_bundle);
+
+    // Produce a textual explanation of the combined effects of the top/bottom_solid_layers
+    // versus top/bottom_min_shell_thickness. Which of the two values wins depends
+    // on the active layer height.
+    static std::string top_bottom_shell_thickness_explanation(const PresetBundle& preset_bundle);
 };
 
 } // namespace Slic3r

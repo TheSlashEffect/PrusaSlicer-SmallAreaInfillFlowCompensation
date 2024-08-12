@@ -1,3 +1,12 @@
+///|/ Copyright (c) Prusa Research 2017 - 2021 Vojtěch Bubník @bubnikv
+///|/
+///|/ ported from lib/Slic3r/Format/STL.pm:
+///|/ Copyright (c) Prusa Research 2017 Vojtěch Bubník @bubnikv
+///|/ Copyright (c) Slic3r 2011 - 2015 Alessandro Ranellucci @alranel
+///|/ Copyright (c) 2012 Mark Hindess
+///|/
+///|/ PrusaSlicer is released under the terms of the AGPLv3 or higher
+///|/
 #include "../libslic3r.h"
 #include "../Model.hpp"
 #include "../TriangleMesh.hpp"
@@ -17,13 +26,11 @@ namespace Slic3r {
 bool load_stl(const char *path, Model *model, const char *object_name_in)
 {
     TriangleMesh mesh;
-    mesh.ReadSTLFile(path);
-    if (mesh.stl.error) {
+    if (! mesh.ReadSTLFile(path)) {
 //    die "Failed to open $file\n" if !-e $path;
         return false;
     }
-    mesh.repair();
-    if (mesh.facets_count() == 0) {
+    if (mesh.empty()) {
         // die "This STL file couldn't be read because it's empty.\n"
         return false;
     }
@@ -52,6 +59,12 @@ bool store_stl(const char *path, TriangleMesh *mesh, bool binary)
 bool store_stl(const char *path, ModelObject *model_object, bool binary)
 {
     TriangleMesh mesh = model_object->mesh();
+    return store_stl(path, &mesh, binary);
+}
+
+bool store_stl(const char *path, Model *model, bool binary)
+{
+    TriangleMesh mesh = model->mesh();
     return store_stl(path, &mesh, binary);
 }
 

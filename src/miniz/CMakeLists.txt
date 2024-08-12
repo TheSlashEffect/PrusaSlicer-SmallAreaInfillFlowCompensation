@@ -1,14 +1,17 @@
+cmake_minimum_required(VERSION 2.8.12)
 project(miniz)
-cmake_minimum_required(VERSION 2.6)
 
-add_library(miniz STATIC
+add_library(miniz INTERFACE)
+
+add_library(miniz_static STATIC
+    miniz.c
     miniz.h
-    miniz_common.h
-    miniz_tdef.h
-    miniz_tinfl.h
-    miniz_zip.h
-    miniz.cpp
-    miniz_tdef.cpp
-    miniz_tinfl.cpp
-    miniz_zip.cpp
 )
+
+if(${CMAKE_C_COMPILER_ID} STREQUAL "GNU")
+    target_compile_definitions(miniz_static PRIVATE _GNU_SOURCE)
+endif()
+
+target_link_libraries(miniz INTERFACE miniz_static)
+target_include_directories(miniz INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
+

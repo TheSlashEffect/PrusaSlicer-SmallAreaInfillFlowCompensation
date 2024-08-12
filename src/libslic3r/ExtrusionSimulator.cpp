@@ -1,3 +1,7 @@
+///|/ Copyright (c) Prusa Research 2016 - 2021 Vojtěch Bubník @bubnikv, Lukáš Matěna @lukasmatena
+///|/
+///|/ PrusaSlicer is released under the terms of the AGPLv3 or higher
+///|/
 // Optimize the extrusion simulator to the bones.
 //#pragma GCC optimize ("O3")
 //#undef SLIC3R_DEBUG
@@ -550,10 +554,10 @@ void gcode_paint_layer(
 		boost::geometry::expand(bboxLine, rect[2]);
 		boost::geometry::expand(bboxLine, rect[3]);
 		B2i bboxLinei(
-			V2i(clamp(0, nc-1, int(floor(bboxLine.min_corner().x()))),
-				clamp(0, nr-1, int(floor(bboxLine.min_corner().y())))),
-			V2i(clamp(0, nc-1, int(ceil (bboxLine.max_corner().x()))),
-				clamp(0, nr-1, int(ceil (bboxLine.max_corner().y())))));
+			V2i(std::clamp(int(floor(bboxLine.min_corner().x())), 0, nc-1),
+				std::clamp(int(floor(bboxLine.min_corner().y())), 0, nr-1)),
+			V2i(std::clamp(int(ceil(bboxLine.max_corner().x())), 0, nc-1),
+				std::clamp(int(ceil(bboxLine.max_corner().y())), 0, nr-1)));
 		// printf("bboxLinei %d,%d %d,%d\n", bboxLinei.min_corner().x(), bboxLinei.min_corner().y(), bboxLinei.max_corner().x(), bboxLinei.max_corner().y());
 #ifdef _DEBUG
 		float area = polyArea(rect, 4);
@@ -597,10 +601,10 @@ void gcode_paint_bitmap(
 		boost::geometry::expand(bboxLine, rect[2]);
 		boost::geometry::expand(bboxLine, rect[3]);
 		B2i bboxLinei(
-			V2i(clamp(0, nc-1, int(floor(bboxLine.min_corner().x()))),
-				clamp(0, nr-1, int(floor(bboxLine.min_corner().y())))),
-			V2i(clamp(0, nc-1, int(ceil (bboxLine.max_corner().x()))),
-				clamp(0, nr-1, int(ceil (bboxLine.max_corner().y())))));
+			V2i(std::clamp(int(floor(bboxLine.min_corner().x())), 0, nc-1),
+				std::clamp(int(floor(bboxLine.min_corner().y())), 0, nr-1)),
+			V2i(std::clamp(int(ceil(bboxLine.max_corner().x())), 0, nc-1),
+				std::clamp(int(ceil(bboxLine.max_corner().y())), 0, nr-1)));
 		// printf("bboxLinei %d,%d %d,%d\n", bboxLinei.min_corner().x(), bboxLinei.min_corner().y(), bboxLinei.max_corner().x(), bboxLinei.max_corner().y());
 		for (int j = bboxLinei.min_corner().y(); j + 1 < bboxLinei.max_corner().y(); ++ j) {
 			for (int i = bboxLinei.min_corner().x(); i + 1 < bboxLinei.max_corner().x(); ++i) {
@@ -660,14 +664,14 @@ void gcode_spread_points(
 	for (ExtrusionPoints::const_iterator it = points.begin(); it != points.end(); ++ it) {
 		const V2f  &center = it->center;
 		const float radius = it->radius;
-		const float radius2 = radius * radius;
+		//const float radius2 = radius * radius;
 		const float height_target = it->height;
 		B2f bbox(center - V2f(radius, radius), center + V2f(radius, radius));
 		B2i bboxi(
-			V2i(clamp(0, nc-1, int(floor(bbox.min_corner().x()))),
-				clamp(0, nr-1, int(floor(bbox.min_corner().y())))),
-			V2i(clamp(0, nc-1, int(ceil (bbox.max_corner().x()))),
-				clamp(0, nr-1, int(ceil (bbox.max_corner().y())))));
+			V2i(std::clamp(int(floor(bbox.min_corner().x())), 0, nc-1),
+				std::clamp(int(floor(bbox.min_corner().y())), 0, nr-1)),
+			V2i(std::clamp(int(ceil(bbox.max_corner().x())), 0, nc-1),
+				std::clamp(int(ceil(bbox.max_corner().y())), 0, nr-1)));
 		/*
 		// Fill in the spans, at which the circle intersects the rows.
 		int row_first = bboxi.min_corner().y();
@@ -695,13 +699,16 @@ void gcode_spread_points(
 			}
 		}
 		*/
-		float area_total     = 0;
-		float volume_total   = 0;
-		float volume_excess  = 0;
-		float volume_deficit = 0;
-		size_t n_cells = 0;
-		float area_circle_total = 0; 
+
+		float area_total   = 0;
+		float volume_total = 0;
+		size_t n_cells     = 0;
+
 #if 0
+        float volume_excess     = 0;
+        float volume_deficit    = 0;
+        float area_circle_total = 0;
+
 		// The intermediate lines.
 		for (int j = row_first; j < row_last; ++ j) {
 			const std::pair<float, float> &span1 = spans[j];
@@ -755,27 +762,36 @@ void gcode_spread_points(
 				cell.volume  = acc[j][i];
 				cell.area    = mask[j][i];
 				assert(cell.area >= 0.f && cell.area <= 1.000001f);
-				area_circle_total += area;
+
+#if 0
+                area_circle_total += area;
+#endif
+
 				if (cell.area < area)
 					cell.area = area;
-				cell.fraction_covered = clamp(0.f, 1.f, (cell.area > 0) ? (area / cell.area) : 0);
+				cell.fraction_covered = std::clamp((cell.area > 0) ? (area / cell.area) : 0, 0.f, 1.f);
 				if (cell.fraction_covered == 0) {
 					-- n_cells;
 					continue;
 				}
 				float cell_height = cell.volume / cell.area;
 				cell.excess_height = cell_height - height_target;
+
+#if 0
+                area_circle_total += area;
 				if (cell.excess_height > 0.f)
 					volume_excess  += cell.excess_height * cell.area * cell.fraction_covered;
 				else
 					volume_deficit -= cell.excess_height * cell.area * cell.fraction_covered;
+#endif
+
 				volume_total += cell.volume * cell.fraction_covered;
 				area_total   += cell.area * cell.fraction_covered;
 			}
 		}
 #endif
-		float area_circle_total2 = float(M_PI) * sqr(radius);
-		float area_err = fabs(area_circle_total2 - area_circle_total) / area_circle_total2;
+//		float area_circle_total2 = float(M_PI) * sqr(radius);
+//		float area_err = fabs(area_circle_total2 - area_circle_total) / area_circle_total2;
 //		printf("area_circle_total: %f, %f, %f\n", area_circle_total, area_circle_total2, area_err);
 		float volume_full = float(M_PI) * sqr(radius) * height_target;
 //		if (true) {
@@ -905,8 +921,8 @@ void ExtrusionSimulator::set_image_size(const Point &image_size)
 	// printf("Allocating image data, allocated\n");
 
 	//FIXME fill the image with red vertical lines.
-	for (size_t r = 0; r < image_size.y(); ++ r) {
-		for (size_t c = 0; c < image_size.x(); c += 2) {
+	for (size_t r = 0; r < size_t(image_size.y()); ++ r) {
+		for (size_t c = 0; c < size_t(image_size.x()); c += 2) {
 			// Color red
 			pimpl->image_data[r * image_size.x() * 4 + c * 4] = 255;
 			// Opacity full
@@ -949,23 +965,25 @@ void ExtrusionSimulator::reset_accumulator()
 	// printf("Reset accumulator, done.\n");
 }
 
+//not used
 void ExtrusionSimulator::extrude_to_accumulator(const ExtrusionPath &path, const Point &shift, ExtrusionSimulationType simulationType)
 {
 	// printf("Extruding a path. Nr points: %d, width: %f, height: %f\r\n", path.polyline.points.size(), path.width, path.height);
 	// Convert the path to V2f points, shift and scale them to the viewport.
 	std::vector<V2f> polyline;
-	polyline.reserve(path.polyline.points.size());
+	polyline.reserve(path.polyline.size());
 	float scalex  = float(viewport.size().x()) / float(bbox.size().x());
 	float scaley  = float(viewport.size().y()) / float(bbox.size().y());
-	float w = scale_(path.width) * scalex;
-	float h = scale_(path.height) * scalex;
-	w = scale_(path.mm3_per_mm / path.height) * scalex;
+	float w = scale_(path.width()) * scalex;
+	//float h = scale_(path.height) * scalex;
+	w = scale_(path.mm3_per_mm() / path.height()) * scalex;
 	// printf("scalex: %f, scaley: %f\n", scalex, scaley);
 	// printf("bbox: %d,%d %d,%d\n", bbox.min.x(), bbox.min.y, bbox.max.x(), bbox.max.y);
-	for (Points::const_iterator it = path.polyline.points.begin(); it != path.polyline.points.end(); ++ it) {
+	//for (Points::const_iterator it = path.polyline.get_points().begin(); it != path.polyline.get_points().end(); ++ it) {
+	for (Point &p : path.polyline.to_polyline()) {
 		// printf("point %d,%d\n", it->x+shift.x(), it->y+shift.y);
 		ExtrusionPoint ept;
-		ept.center = V2f(float((*it)(0)+shift.x()-bbox.min.x()) * scalex, float((*it)(1)+shift.y()-bbox.min.y()) * scaley);
+		ept.center = V2f(float(p.x()+shift.x()-bbox.min.x()) * scalex, float(p.y()+shift.y()-bbox.min.y()) * scaley);
 		ept.radius = w/2.f;
 		ept.height = 0.5f;
 		polyline.push_back(ept.center);
@@ -993,8 +1011,8 @@ void ExtrusionSimulator::evaluate_accumulator(ExtrusionSimulationType simulation
 		for (int r = 0; r < sz.y(); ++r) {
 			for (int c = 0; c < sz.x(); ++c) {
 				float p = 0;
-				for (int j = 0; j < pimpl->bitmap_oversampled; ++ j) {
-					for (int i = 0; i < pimpl->bitmap_oversampled; ++ i) {
+				for (unsigned int j = 0; j < pimpl->bitmap_oversampled; ++ j) {
+					for (unsigned int i = 0; i < pimpl->bitmap_oversampled; ++ i) {
 						if (pimpl->bitmap[r * pimpl->bitmap_oversampled + j][c * pimpl->bitmap_oversampled + i])
 							p += 1.f;
 					}
@@ -1018,7 +1036,7 @@ void ExtrusionSimulator::evaluate_accumulator(ExtrusionSimulationType simulation
 			float p = mask[r][c];
 			#endif
 			int   idx = int(floor(p * float(pimpl->color_gradient.size()) + 0.5f));
-			V3uc  clr = pimpl->color_gradient[clamp(0, int(pimpl->color_gradient.size()-1), idx)];
+			V3uc  clr = pimpl->color_gradient[std::clamp(idx, 0, int(pimpl->color_gradient.size()-1))];
 			*ptr ++ = clr.get<0>();
 			*ptr ++ = clr.get<1>();
 			*ptr ++ = clr.get<2>();

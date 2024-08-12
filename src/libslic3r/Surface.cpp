@@ -1,59 +1,67 @@
+///|/ Copyright (c) Prusa Research 2016 - 2019 Vojtěch Bubník @bubnikv
+///|/ Copyright (c) Slic3r 2013 - 2015 Alessandro Ranellucci @alranel
+///|/ Copyright (c) 2014 Petr Ledvina @ledvinap
+///|/
+///|/ ported from lib/Slic3r/Surface.pm:
+///|/ Copyright (c) Prusa Research 2022 Vojtěch Bubník @bubnikv
+///|/ Copyright (c) Slic3r 2011 - 2014 Alessandro Ranellucci @alranel
+///|/
+///|/ PrusaSlicer is released under the terms of the AGPLv3 or higher
+///|/
 #include "BoundingBox.hpp"
 #include "Surface.hpp"
 #include "SVG.hpp"
 
 namespace Slic3r {
 
-Surface::operator Polygons() const
-{
-    return this->expolygon;
-}
-
-double
-Surface::area() const
-{
-    return this->expolygon.area();
+bool
+Surface::has_fill_void() const {
+    return (this->surface_type & stDensVoid) != 0;
 }
 
 bool
-Surface::is_solid() const
-{
-    return this->surface_type == stTop
-        || this->surface_type == stBottom
-        || this->surface_type == stBottomBridge
-        || this->surface_type == stInternalSolid
-        || this->surface_type == stInternalBridge;
+Surface::has_fill_sparse() const {
+    return (this->surface_type & stDensSparse) != 0;
 }
 
 bool
-Surface::is_external() const
-{
-    return this->surface_type == stTop
-        || this->surface_type == stBottom
-        || this->surface_type == stBottomBridge;
+Surface::has_fill_solid() const {
+    return (this->surface_type & stDensSolid) != 0;
 }
 
 bool
-Surface::is_internal() const
+Surface::has_pos_external() const
 {
-    return this->surface_type == stInternal
-        || this->surface_type == stInternalBridge
-        || this->surface_type == stInternalSolid
-        || this->surface_type == stInternalVoid;
+    return has_pos_top() || has_pos_bottom();
 }
 
 bool
-Surface::is_bottom() const
+Surface::has_pos_top() const
 {
-    return this->surface_type == stBottom
-        || this->surface_type == stBottomBridge;
+    return (this->surface_type & stPosTop) != 0;
 }
 
 bool
-Surface::is_bridge() const
+Surface::has_pos_internal() const
 {
-    return this->surface_type == stBottomBridge
-        || this->surface_type == stInternalBridge;
+    return (this->surface_type & stPosInternal) != 0;
+}
+
+bool
+Surface::has_pos_bottom() const
+{
+    return (this->surface_type & stPosBottom) != 0;
+}
+
+bool
+Surface::has_mod_bridge() const
+{
+    return (this->surface_type & stModBridge) != 0;
+}
+bool
+Surface::has_mod_overBridge() const
+{
+    return (this->surface_type & stModOverBridge) != 0;
 }
 
 BoundingBox get_extents(const Surface &surface)
@@ -72,7 +80,7 @@ BoundingBox get_extents(const Surfaces &surfaces)
     return bbox;
 }
 
-BoundingBox get_extents(const SurfacesPtr &surfaces)
+BoundingBox get_extents(const SurfacesConstPtr &surfaces)
 {
     BoundingBox bbox;
     if (! surfaces.empty()) {
@@ -85,17 +93,16 @@ BoundingBox get_extents(const SurfacesPtr &surfaces)
 
 const char* surface_type_to_color_name(const SurfaceType surface_type)
 {
-    switch (surface_type) {
-        case stTop:             return "rgb(255,0,0)"; // "red";
-        case stBottom:          return "rgb(0,255,0)"; // "green";
-        case stBottomBridge:    return "rgb(0,0,255)"; // "blue";
-        case stInternal:        return "rgb(255,255,128)"; // yellow 
-        case stInternalSolid:   return "rgb(255,0,255)"; // magenta
-        case stInternalBridge:  return "rgb(0,255,255)";
-        case stInternalVoid:    return "rgb(128,128,128)";
-        case stPerimeter:       return "rgb(128,0,0)"; // maroon
-        default:                return "rgb(64,64,64)";
-    };
+    if ((surface_type & stPosTop) != 0) return "rgb(255,0,0)"; // "red";
+    if (surface_type == (stPosBottom | stDensSolid | stModBridge)) return "rgb(0,0,255)"; // "blue";
+    if ((surface_type & stPosBottom) != 0) return "rgb(0,255,0)"; // "green";
+    if (surface_type == (stPosInternal | stDensSolid | stModBridge)) return "rgb(0,255,255)"; // cyan
+    if (surface_type == (stPosInternal | stDensSolid | stModOverBridge)) return "rgb(0,255,128)"; // green-cyan
+    if (surface_type == (stPosInternal | stDensSolid)) return "rgb(255,0,255)"; // magenta
+    if (surface_type == (stPosInternal | stDensVoid)) return "rgb(128,128,128)"; // gray
+    if (surface_type == (stPosInternal | stDensSparse)) return "rgb(255,255,128)"; // yellow 
+    if ((surface_type & stPosPerimeter) != 0) return "rgb(128,0,0)"; // maroon
+    return "rgb(64,64,64)"; //dark gray
 }
 
 Point export_surface_type_legend_to_svg_box_size()
@@ -110,25 +117,27 @@ void export_surface_type_legend_to_svg(SVG &svg, const Point &pos)
     coord_t pos_x = pos_x0;
     coord_t pos_y = pos(1) + scale_(1.5);
     coord_t step_x = scale_(10.);
-    svg.draw_legend(Point(pos_x, pos_y), "perimeter"      , surface_type_to_color_name(stPerimeter));
+    svg.draw_legend(Point(pos_x, pos_y), "perimeter"      , surface_type_to_color_name(stPosPerimeter));
     pos_x += step_x;
-    svg.draw_legend(Point(pos_x, pos_y), "top"            , surface_type_to_color_name(stTop));
+    svg.draw_legend(Point(pos_x, pos_y), "top"            , surface_type_to_color_name(stPosTop));
     pos_x += step_x;
-    svg.draw_legend(Point(pos_x, pos_y), "bottom"         , surface_type_to_color_name(stBottom));
+    svg.draw_legend(Point(pos_x, pos_y), "bottom"         , surface_type_to_color_name(stPosBottom));
     pos_x += step_x;
-    svg.draw_legend(Point(pos_x, pos_y), "bottom bridge"  , surface_type_to_color_name(stBottomBridge));
+    svg.draw_legend(Point(pos_x, pos_y), "bottom bridge"  , surface_type_to_color_name(stPosBottom | stModBridge));
     pos_x += step_x;
     svg.draw_legend(Point(pos_x, pos_y), "invalid"        , surface_type_to_color_name(SurfaceType(-1)));
     // 2nd row
     pos_x = pos_x0;
     pos_y = pos(1)+scale_(2.8);
-    svg.draw_legend(Point(pos_x, pos_y), "internal"       , surface_type_to_color_name(stInternal));
+    svg.draw_legend(Point(pos_x, pos_y), "internal"       , surface_type_to_color_name(stPosInternal | stDensSparse));
     pos_x += step_x;
-    svg.draw_legend(Point(pos_x, pos_y), "internal solid" , surface_type_to_color_name(stInternalSolid));
+    svg.draw_legend(Point(pos_x, pos_y), "internal solid" , surface_type_to_color_name(stPosInternal | stDensSolid));
     pos_x += step_x;
-    svg.draw_legend(Point(pos_x, pos_y), "internal bridge", surface_type_to_color_name(stInternalBridge));
+    svg.draw_legend(Point(pos_x, pos_y), "internal bridge", surface_type_to_color_name(stPosInternal | stDensSolid | stModBridge));
     pos_x += step_x;
-    svg.draw_legend(Point(pos_x, pos_y), "internal void"  , surface_type_to_color_name(stInternalVoid));
+    svg.draw_legend(Point(pos_x, pos_y), "internal over bridge", surface_type_to_color_name(stPosInternal| stDensSolid | stModOverBridge));
+    pos_x += step_x;
+    svg.draw_legend(Point(pos_x, pos_y), "internal void"  , surface_type_to_color_name(stPosInternal | stDensVoid));
 }
 
 bool export_to_svg(const char *path, const Surfaces &surfaces, const float transparency)
@@ -142,6 +151,55 @@ bool export_to_svg(const char *path, const Surfaces &surfaces, const float trans
         svg.draw(surface->expolygon, surface_type_to_color_name(surface->surface_type), transparency);
     svg.Close();
     return true;
+}
+
+
+std::string surfaceType_to_string(SurfaceType st)
+{
+    std::string str;
+    if ((st & stPosTop) != 0)
+        str += "posTop";
+    if ((st & stPosBottom) != 0) {
+        if (!str.empty())
+            str += "||";
+        str += "posBottom";
+    }
+    if ((st & stPosInternal) != 0) {
+        if (!str.empty())
+            str += "||";
+        str += "posInternal";
+    }
+    if ((st & stPosPerimeter) != 0) {
+        if (!str.empty())
+            str += "||";
+        str += "posPerimeter";
+    }
+    if ((st & stDensSolid) != 0) {
+        if (!str.empty())
+            str += "||";
+        str += "densSolid";
+    }
+    if ((st & stDensSparse) != 0) {
+        if (!str.empty())
+            str += "||";
+        str += "densSparse";
+    }
+    if ((st & stDensVoid) != 0) {
+        if (!str.empty())
+            str += "||";
+        str += "densVoid";
+    }
+    if ((st & stModBridge) != 0) {
+        if (!str.empty())
+            str += "||";
+        str += "modBridge";
+    }
+    if ((st & stModOverBridge) != 0) {
+        if (!str.empty())
+            str += "||";
+        str += "modOverBridge";
+    }
+    return str.empty() ? "none" : str;
 }
 
 }

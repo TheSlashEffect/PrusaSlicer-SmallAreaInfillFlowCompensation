@@ -1,14 +1,24 @@
+///|/ Copyright (c) Prusa Research 2016 - 2022 Lukáš Hejl @hejllukas, David Kocík @kocikdav, Oleksandra Iushchenko @YuSanka, Vojtěch Bubník @bubnikv, Enrico Turri @enricoturri1966, Lukáš Matěna @lukasmatena, Vojtěch Král @vojtechkral, Tomáš Mészáros @tamasmeszaros
+///|/ Copyright (c) Slic3r 2015 Alessandro Ranellucci @alranel
+///|/
+///|/ PrusaSlicer is released under the terms of the AGPLv3 or higher
+///|/
 #ifndef slic3r_GUI_hpp_
 #define slic3r_GUI_hpp_
 
+namespace boost { class any; }
+namespace boost::filesystem { class path; }
+
+#include <wx/string.h>
+
 #include "libslic3r/Config.hpp"
+#include "libslic3r/Preset.hpp"
 
 class wxWindow;
 class wxMenuBar;
-class wxNotebook;
 class wxComboCtrl;
 class wxFileDialog;
-class wxString;
+class wxArrayString;
 class wxTopLevelWindow;
 
 namespace Slic3r { 
@@ -16,7 +26,6 @@ namespace Slic3r {
 class AppConfig;
 class DynamicPrintConfig;
 class Print;
-class GCodePreviewData;
 
 namespace GUI {
 
@@ -25,52 +34,72 @@ void enable_screensaver();
 bool debugged();
 void break_to_debugger();
 
-AppConfig*		get_app_config();
+// Platform specific Ctrl+/Alt+ (Windows, Linux) vs. ⌘/⌥ (OSX) prefixes 
+extern const std::string& shortkey_ctrl_prefix();
+extern const std::string& shortkey_alt_prefix();
+
+extern AppConfig* get_app_config();
 
 extern void add_menus(wxMenuBar *menu, int event_preferences_changed, int event_language_change);
 
-// Checks if configuration wizard needs to run, calls config_wizard if so.
-// Returns whether the Wizard ran.
-extern bool config_wizard_startup(bool app_config_exists);
-
-// Opens the configuration wizard, returns true if wizard is finished & accepted.
-// The run_reason argument is actually ConfigWizard::RunReason, but int is used here because of Perl.
-extern void config_wizard(int run_reason);
-
-// Change option value in config
-void change_opt_value(DynamicPrintConfig& config, const t_config_option_key& opt_key, const boost::any& value, int opt_index = 0);
-
-void show_error(wxWindow* parent, const wxString& message);
-void show_error_id(int id, const std::string& message);   // For Perl
-void show_info(wxWindow* parent, const wxString& message, const wxString& title);
+// If monospaced_font is true, the error message is displayed using html <code><pre></pre></code> tags,
+// so that the code formatting will be preserved. This is useful for reporting errors from the placeholder parser.
+void show_error(wxWindow* parent, const wxString& message, bool monospaced_font = false);
+void show_error(wxWindow* parent, const char* message, bool monospaced_font = false);
+inline void show_error(wxWindow* parent, const std::string& message, bool monospaced_font = false) { show_error(parent, message.c_str(), monospaced_font); }
+void show_info(wxWindow* parent, const wxString& message, const wxString& title = wxString());
+void show_info(wxWindow* parent, const char* message, const char* title = nullptr);
+inline void show_info(wxWindow* parent, const std::string& message,const std::string& title = std::string()) { show_info(parent, message.c_str(), title.c_str()); }
 void warning_catcher(wxWindow* parent, const wxString& message);
+void show_substitutions_info(const PresetsConfigSubstitutions& presets_config_substitutions);
+void show_substitutions_info(const ConfigSubstitutions& config_substitutions, const std::string& filename);
 
 // Creates a wxCheckListBoxComboPopup inside the given wxComboCtrl, filled with the given text and items.
-// Items are all initialized to the given value.
-// Items must be separated by '|', for example "Item1|Item2|Item3", and so on.
-void create_combochecklist(wxComboCtrl* comboCtrl, std::string text, std::string items, bool initial_value);
+// Items data must be separated by '|', and contain the item name to be shown followed by its initial value (0 for false, 1 for true).
+// For example "Item1|0|Item2|1|Item3|0", and so on.
+void create_combochecklist(wxComboCtrl* comboCtrl, const std::string& text, const std::string& items);
 
 // Returns the current state of the items listed in the wxCheckListBoxComboPopup contained in the given wxComboCtrl,
-// encoded inside an int.
-int combochecklist_get_flags(wxComboCtrl* comboCtrl);
+// encoded inside an unsigned int.
+unsigned int combochecklist_get_flags(wxComboCtrl* comboCtrl);
 
-// Return wxString from std::string in UTF8
+// Sets the current state of the items listed in the wxCheckListBoxComboPopup contained in the given wxComboCtrl,
+// with the flags encoded in the given unsigned int.
+void combochecklist_set_flags(wxComboCtrl* comboCtrl, unsigned int flags);
+
+// wxString conversions:
+
+// wxString from std::string in UTF8
 wxString	from_u8(const std::string &str);
-// Return std::string in UTF8 from wxString
+// std::string in UTF8 from wxString
 std::string	into_u8(const wxString &str);
-
-// Returns the dimensions of the screen on which the main frame is displayed
-bool get_current_screen_size(wxWindow *window, unsigned &width, unsigned &height);
-
-// Save window size and maximized status into AppConfig
-void save_window_size(wxTopLevelWindow *window, const std::string &name);
-// Restore the above
-void restore_window_size(wxTopLevelWindow *window, const std::string &name);
+// wxString from boost path
+wxString	from_path(const boost::filesystem::path &path);
+// boost path from wxString
+boost::filesystem::path	into_path(const wxString &str);
 
 // Display an About dialog
 extern void about();
 // Ask the destop to open the datadir using the default file explorer.
 extern void desktop_open_datadir_folder();
+// Ask the destop to open the directory specified by path using the default file explorer.
+void desktop_open_folder(const boost::filesystem::path& path);
+
+#ifdef __linux__
+// Calling wxExecute on Linux with proper handling of AppImage's env vars.
+// argv example: { "xdg-open", path.c_str(), nullptr }
+void desktop_execute(const char* argv[]);
+void desktop_execute_get_result(wxString command, wxArrayString& output);
+#endif // __linux__
+
+#ifdef _WIN32
+// Call CreateProcessW to start external proccess on path
+// returns true on success
+// path should contain path to the process
+// cmd_opt can be empty or contain command line options. Example: L"/silent"
+// error_msg will contain error message if create_process return false
+bool create_process(const boost::filesystem::path& path, const std::wstring& cmd_opt, std::string& error_msg);
+#endif //_WIN32
 
 } // namespace GUI
 } // namespace Slic3r

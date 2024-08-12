@@ -1,3 +1,7 @@
+///|/ Copyright (c) Prusa Research 2018 - 2022 Enrico Turri @enricoturri1966, David Kocík @kocikdav, Oleksandra Iushchenko @YuSanka, Vojtěch Král @vojtechkral, Vojtěch Bubník @bubnikv
+///|/
+///|/ PrusaSlicer is released under the terms of the AGPLv3 or higher
+///|/
 #ifndef slic3r_GLToolbar_hpp_
 #define slic3r_GLToolbar_hpp_
 
@@ -7,7 +11,7 @@
 
 #include "GLTexture.hpp"
 #include "Event.hpp"
-
+#include "libslic3r/Point.hpp"
 
 class wxEvtHandler;
 
@@ -20,6 +24,8 @@ wxDECLARE_EVENT(EVT_GLTOOLBAR_ADD, SimpleEvent);
 wxDECLARE_EVENT(EVT_GLTOOLBAR_DELETE, SimpleEvent);
 wxDECLARE_EVENT(EVT_GLTOOLBAR_DELETE_ALL, SimpleEvent);
 wxDECLARE_EVENT(EVT_GLTOOLBAR_ARRANGE, SimpleEvent);
+wxDECLARE_EVENT(EVT_GLTOOLBAR_COPY, SimpleEvent);
+wxDECLARE_EVENT(EVT_GLTOOLBAR_PASTE, SimpleEvent);
 wxDECLARE_EVENT(EVT_GLTOOLBAR_MORE, SimpleEvent);
 wxDECLARE_EVENT(EVT_GLTOOLBAR_FEWER, SimpleEvent);
 wxDECLARE_EVENT(EVT_GLTOOLBAR_SPLIT_OBJECTS, SimpleEvent);
@@ -32,11 +38,24 @@ wxDECLARE_EVENT(EVT_GLVIEWTOOLBAR_PREVIEW, SimpleEvent);
 class GLToolbarItem
 {
 public:
+    typedef std::function<void()> ActionCallback;
+    typedef std::function<bool()> VisibilityCallback;
+    typedef std::function<bool()> EnablingCallback;
+    typedef std::function<void(float, float, float, float)> RenderCallback;
+
     enum EType : unsigned char
     {
         Action,
         Separator,
         Num_Types
+    };
+
+    enum EActionType : unsigned char
+    {
+        Undefined,
+        Left,
+        Right,
+        Num_Action_Types
     };
 
     enum EState : unsigned char
@@ -46,88 +65,106 @@ public:
         Disabled,
         Hover,
         HoverPressed,
+        HoverDisabled,
         Num_States
+    };
+
+    enum EHighlightState : unsigned char
+    {
+        HighlightedShown,
+        HighlightedHidden,
+        Num_Rendered_Highlight_States,
+        NotHighlighted
     };
 
     struct Data
     {
+        struct Option
+        {
+            bool toggable;
+            ActionCallback action_callback;
+            RenderCallback render_callback;
+
+            Option();
+
+            bool can_render() const { return toggable && (render_callback != nullptr); }
+        };
+
         std::string name;
+        std::string icon_filename;
         std::string tooltip;
+        std::string additional_tooltip;
         unsigned int sprite_id;
-        bool is_toggable;
-        wxEventType action_event;
+        // mouse left click
+        Option left;
+        // mouse right click
+        Option right;
+        bool visible;
+        VisibilityCallback visibility_callback;
+        EnablingCallback enabling_callback;
 
         Data();
     };
+
+    static const ActionCallback Default_Action_Callback;
+    static const VisibilityCallback Default_Visibility_Callback;
+    static const EnablingCallback Default_Enabling_Callback;
+    static const RenderCallback Default_Render_Callback;
 
 private:
     EType m_type;
     EState m_state;
     Data m_data;
-
+    EActionType m_last_action_type;
+    EHighlightState m_highlight_state;
 public:
     GLToolbarItem(EType type, const Data& data);
 
-    EState get_state() const;
-    void set_state(EState state);
+    EState get_state() const { return m_state; }
+    void set_state(EState state) { m_state = state; }
 
-    const std::string& get_name() const;
-    const std::string& get_tooltip() const;
+    EHighlightState get_highlight() const { return m_highlight_state; }
+    void set_highlight(EHighlightState state) { m_highlight_state = state; }
 
-    void do_action(wxEvtHandler *target);
+    const std::string& get_name() const { return m_data.name; }
+    const std::string& get_icon_filename() const { return m_data.icon_filename; }
+    const std::string& get_tooltip() const { return m_data.tooltip; }
+    const std::string& get_additional_tooltip() const { return m_data.additional_tooltip; }
+    void set_additional_tooltip(const std::string& text) { m_data.additional_tooltip = text; }
+    void set_tooltip(const std::string& text)            { m_data.tooltip = text; }
 
-    bool is_enabled() const;
-#if ENABLE_TOOLBAR_BACKGROUND_TEXTURE
-    bool is_disabled() const;
-#endif // ENABLE_TOOLBAR_BACKGROUND_TEXTURE
-    bool is_hovered() const;
-    bool is_pressed() const;
+    void do_left_action() { m_last_action_type = Left; m_data.left.action_callback(); }
+    void do_right_action() { m_last_action_type = Right; m_data.right.action_callback(); }
 
-    bool is_toggable() const;
-    bool is_separator() const;
+    bool is_enabled() const { return (m_state != Disabled) && (m_state != HoverDisabled); }
+    bool is_disabled() const { return (m_state == Disabled) || (m_state == HoverDisabled); }
+    bool is_hovered() const { return (m_state == Hover) || (m_state == HoverPressed) || (m_state == HoverDisabled); }
+    bool is_pressed() const { return (m_state == Pressed) || (m_state == HoverPressed); }
+    bool is_visible() const { return m_data.visible; }
+    bool is_separator() const { return m_type == Separator; }
 
-    void render(unsigned int tex_id, float left, float right, float bottom, float top, unsigned int texture_size, unsigned int border_size, unsigned int icon_size, unsigned int gap_size) const;
+    bool is_left_toggable() const { return m_data.left.toggable; }
+    bool is_right_toggable() const { return m_data.right.toggable; }
+
+    bool has_left_render_callback() const { return m_data.left.render_callback != nullptr; }
+    bool has_right_render_callback() const { return m_data.right.render_callback != nullptr; }
+
+    EActionType get_last_action_type() const { return m_last_action_type; }
+    void reset_last_action_type() { m_last_action_type = Undefined; }
+
+    // returns true if the state changes
+    bool update_visibility();
+    // returns true if the state changes
+    bool update_enabled_state();
+
+    void render(const GLCanvas3D& parent, unsigned int tex_id, float left, float right, float bottom, float top, unsigned int tex_width, unsigned int tex_height, unsigned int icon_size) const;
 
 private:
-    GLTexture::Quad_UVs get_uvs(unsigned int texture_size, unsigned int border_size, unsigned int icon_size, unsigned int gap_size) const;
+    void set_visible(bool visible) { m_data.visible = visible; }
+
+    friend class GLToolbar;
 };
 
-// items icon textures are assumed to be square and all with the same size in pixels, no internal check is done
-// icons are layed-out into the texture starting from the top-left corner in the same order as enum GLToolbarItem::EState
-// from left to right
-struct ItemsIconsTexture
-{
-#if ENABLE_TOOLBAR_BACKGROUND_TEXTURE
-    struct Metadata
-    {
-        // path of the file containing the icons' texture
-        std::string filename;
-        // size of the square icons, in pixels
-        unsigned int icon_size;
-        // size of the border, in pixels
-        unsigned int icon_border_size;
-        // distance between two adjacent icons (to avoid filtering artifacts), in pixels
-        unsigned int icon_gap_size;
-
-        Metadata();
-    };
-#endif // ENABLE_TOOLBAR_BACKGROUND_TEXTURE
-    GLTexture texture;
-#if ENABLE_TOOLBAR_BACKGROUND_TEXTURE
-    Metadata metadata;
-#else
-    // size of the square icons, in pixels
-    unsigned int items_icon_size;
-    // distance from the border, in pixels
-    unsigned int items_icon_border_size;
-    // distance between two adjacent icons (to avoid filtering artifacts), in pixels
-    unsigned int items_icon_gap_size;
-
-    ItemsIconsTexture();
-#endif // ENABLE_TOOLBAR_BACKGROUND_TEXTURE
-};
-
-#if ENABLE_TOOLBAR_BACKGROUND_TEXTURE
 struct BackgroundTexture
 {
     struct Metadata
@@ -149,19 +186,18 @@ struct BackgroundTexture
     GLTexture texture;
     Metadata metadata;
 };
-#endif // ENABLE_TOOLBAR_BACKGROUND_TEXTURE
 
 class GLToolbar
 {
 public:
-#if ENABLE_TOOLBAR_BACKGROUND_TEXTURE
+    static const float Default_Icons_Size;
+
     enum EType : unsigned char
     {
         Normal,
         Radio,
         Num_Types
     };
-#endif // ENABLE_TOOLBAR_BACKGROUND_TEXTURE
 
     struct Layout
     {
@@ -172,34 +208,36 @@ public:
             Num_Types
         };
 
-        enum EOrientation : unsigned int
+        enum EHorizontalOrientation : unsigned char
         {
-            Top,
-            Bottom,
-            Left,
-            Right,
-            Center,
-            Num_Locations
+            HO_Left,
+            HO_Center,
+            HO_Right,
+            Num_Horizontal_Orientations
+        };
+
+        enum EVerticalOrientation : unsigned char
+        {
+            VO_Top,
+            VO_Center,
+            VO_Bottom,
+            Num_Vertical_Orientations
         };
 
         EType type;
-#if ENABLE_TOOLBAR_BACKGROUND_TEXTURE
-        EOrientation orientation;
-#endif // ENABLE_TOOLBAR_BACKGROUND_TEXTURE
+        EHorizontalOrientation horizontal_orientation;
+        EVerticalOrientation vertical_orientation;
         float top;
         float left;
-#if ENABLE_TOOLBAR_BACKGROUND_TEXTURE
         float border;
-#endif // ENABLE_TOOLBAR_BACKGROUND_TEXTURE
         float separator_size;
         float gap_size;
-        float icons_scale;
+        float icons_size;
+        float scale;
 
-#if ENABLE_TOOLBAR_BACKGROUND_TEXTURE
         float width;
         float height;
         bool dirty;
-#endif // ENABLE_TOOLBAR_BACKGROUND_TEXTURE
 
         Layout();
     };
@@ -207,224 +245,121 @@ public:
 private:
     typedef std::vector<GLToolbarItem*> ItemsList;
 
-#if ENABLE_TOOLBAR_BACKGROUND_TEXTURE
     EType m_type;
-#else
-    GLCanvas3D& m_parent;
-#endif // ENABLE_TOOLBAR_BACKGROUND_TEXTURE
+    std::string m_name;
     bool m_enabled;
-    ItemsIconsTexture m_icons_texture;
-#if ENABLE_TOOLBAR_BACKGROUND_TEXTURE
+    GLTexture m_icons_texture;
+    bool m_icons_texture_dirty;
     BackgroundTexture m_background_texture;
-    mutable Layout m_layout;
-#else
+    GLTexture m_arrow_texture;
     Layout m_layout;
-#endif // ENABLE_TOOLBAR_BACKGROUND_TEXTURE
 
     ItemsList m_items;
 
+    struct MouseCapture
+    {
+        bool left;
+        bool middle;
+        bool right;
+        GLCanvas3D* parent;
+
+        MouseCapture() { reset(); }
+
+        bool any() const { return left || middle || right; }
+        void reset() { left = middle = right = false; parent = nullptr; }
+    };
+
+    MouseCapture m_mouse_capture;
+    int m_pressed_toggable_id;
+
 public:
-#if ENABLE_TOOLBAR_BACKGROUND_TEXTURE
-    explicit GLToolbar(EType type);
-#else
-    explicit GLToolbar(GLCanvas3D& parent);
-#endif // ENABLE_TOOLBAR_BACKGROUND_TEXTURE
+    GLToolbar(EType type, const std::string& name);
     ~GLToolbar();
 
-#if ENABLE_TOOLBAR_BACKGROUND_TEXTURE
-    bool init(const ItemsIconsTexture::Metadata& icons_texture, const BackgroundTexture::Metadata& background_texture);
-#else
-    bool init(const std::string& icons_texture_filename, unsigned int items_icon_size, unsigned int items_icon_border_size, unsigned int items_icon_gap_size);
-#endif // ENABLE_TOOLBAR_BACKGROUND_TEXTURE
+    bool init(const BackgroundTexture::Metadata& background_texture);
+
+    bool init_arrow(const std::string& filename);
 
     Layout::EType get_layout_type() const;
     void set_layout_type(Layout::EType type);
-#if ENABLE_TOOLBAR_BACKGROUND_TEXTURE
-    Layout::EOrientation get_layout_orientation() const;
-    void set_layout_orientation(Layout::EOrientation orientation);
-#endif // ENABLE_TOOLBAR_BACKGROUND_TEXTURE
+    Layout::EHorizontalOrientation get_horizontal_orientation() const { return m_layout.horizontal_orientation; }
+    void set_horizontal_orientation(Layout::EHorizontalOrientation orientation) { m_layout.horizontal_orientation = orientation; }
+    Layout::EVerticalOrientation get_vertical_orientation() const { return m_layout.vertical_orientation; }
+    void set_vertical_orientation(Layout::EVerticalOrientation orientation) { m_layout.vertical_orientation = orientation; }
 
     void set_position(float top, float left);
-#if ENABLE_TOOLBAR_BACKGROUND_TEXTURE
     void set_border(float border);
-#endif // ENABLE_TOOLBAR_BACKGROUND_TEXTURE
     void set_separator_size(float size);
     void set_gap_size(float size);
-    void set_icons_scale(float scale);
+    void set_icons_size(float size);
+    void set_scale(float scale);
 
-    bool is_enabled() const;
-    void set_enabled(bool enable);
+    bool is_enabled() const { return m_enabled; }
+    void set_enabled(bool enable) { m_enabled = enable; }
 
     bool add_item(const GLToolbarItem::Data& data);
     bool add_separator();
 
-    float get_width() const;
-    float get_height() const;
+    float get_width();
+    float get_height();
 
-    void enable_item(const std::string& name);
-    void disable_item(const std::string& name);
-#if ENABLE_TOOLBAR_BACKGROUND_TEXTURE
     void select_item(const std::string& name);
-#endif // ENABLE_TOOLBAR_BACKGROUND_TEXTURE
 
     bool is_item_pressed(const std::string& name) const;
-#if ENABLE_TOOLBAR_BACKGROUND_TEXTURE
     bool is_item_disabled(const std::string& name) const;
-#endif // ENABLE_TOOLBAR_BACKGROUND_TEXTURE
+    bool is_item_visible(const std::string& name) const;
 
-#if ENABLE_REMOVE_TABS_FROM_PLATER
-#if ENABLE_TOOLBAR_BACKGROUND_TEXTURE
-    std::string update_hover_state(const Vec2d& mouse_pos, GLCanvas3D& parent);
-#else
-    std::string update_hover_state(const Vec2d& mouse_pos);
-#endif // ENABLE_TOOLBAR_BACKGROUND_TEXTURE
-#else
-#if ENABLE_TOOLBAR_BACKGROUND_TEXTURE
-    void update_hover_state(const Vec2d& mouse_pos, GLCanvas3D& parent);
-#else
-    void update_hover_state(const Vec2d& mouse_pos);
-#endif // ENABLE_TOOLBAR_BACKGROUND_TEXTURE
-#endif // ENABLE_REMOVE_TABS_FROM_PLATER
+    bool is_any_item_pressed() const;
 
-#if ENABLE_TOOLBAR_BACKGROUND_TEXTURE
-    // returns the id of the item under the given mouse position or -1 if none
-    int contains_mouse(const Vec2d& mouse_pos, const GLCanvas3D& parent) const;
+    unsigned int get_items_count() const { return (unsigned int)m_items.size(); }
+    int get_item_id(const std::string& name) const;
 
-    void do_action(unsigned int item_id, GLCanvas3D& parent);
-#else
-    // returns the id of the item under the given mouse position or -1 if none
-    int contains_mouse(const Vec2d& mouse_pos) const;
+    void force_left_action(int item_id, GLCanvas3D& parent) { do_action(GLToolbarItem::Left, item_id, parent, false); }
+    void force_right_action(int item_id, GLCanvas3D& parent) { do_action(GLToolbarItem::Right, item_id, parent, false); }
 
-    void do_action(unsigned int item_id);
-#endif // ENABLE_TOOLBAR_BACKGROUND_TEXTURE
+    std::string get_tooltip() const;
 
-#if ENABLE_TOOLBAR_BACKGROUND_TEXTURE
-    void render(const GLCanvas3D& parent) const;    
-#else
-    void render() const;
-#endif // ENABLE_TOOLBAR_BACKGROUND_TEXTURE
+    void get_additional_tooltip(int item_id, std::string& text);
+    void set_additional_tooltip(int item_id, const std::string& text);
+    void set_tooltip(int item_id, const std::string& text);
+    int  get_visible_items_cnt() const;
 
+    // returns true if any item changed its state
+    bool update_items_state();
+
+    void render(const GLCanvas3D& parent);
+    void render_arrow(const GLCanvas3D& parent, GLToolbarItem* highlighted_item);
+
+    bool on_mouse(wxMouseEvent& evt, GLCanvas3D& parent);
+    // get item pointer for highlighter timer
+    GLToolbarItem* get_item(const std::string& item_name);
 private:
-#if ENABLE_TOOLBAR_BACKGROUND_TEXTURE
-    void calc_layout() const;
-#endif // ENABLE_TOOLBAR_BACKGROUND_TEXTURE
+    void calc_layout();
     float get_width_horizontal() const;
     float get_width_vertical() const;
     float get_height_horizontal() const;
     float get_height_vertical() const;
     float get_main_size() const;
-#if ENABLE_REMOVE_TABS_FROM_PLATER
-#if ENABLE_TOOLBAR_BACKGROUND_TEXTURE
-    std::string update_hover_state_horizontal(const Vec2d& mouse_pos, GLCanvas3D& parent);
-    std::string update_hover_state_vertical(const Vec2d& mouse_pos, GLCanvas3D& parent);
-#else
-    std::string update_hover_state_horizontal(const Vec2d& mouse_pos);
-    std::string update_hover_state_vertical(const Vec2d& mouse_pos);
-#endif // ENABLE_TOOLBAR_BACKGROUND_TEXTURE
-#else
-#if ENABLE_TOOLBAR_BACKGROUND_TEXTURE
+    void do_action(GLToolbarItem::EActionType type, int item_id, GLCanvas3D& parent, bool check_hover);
+    void update_hover_state(const Vec2d& mouse_pos, GLCanvas3D& parent);
     void update_hover_state_horizontal(const Vec2d& mouse_pos, GLCanvas3D& parent);
     void update_hover_state_vertical(const Vec2d& mouse_pos, GLCanvas3D& parent);
-#else
-    void update_hover_state_horizontal(const Vec2d& mouse_pos);
-    void update_hover_state_vertical(const Vec2d& mouse_pos);
-#endif // ENABLE_TOOLBAR_BACKGROUND_TEXTURE
-#endif // ENABLE_REMOVE_TABS_FROM_PLATER
-#if ENABLE_TOOLBAR_BACKGROUND_TEXTURE
+    // returns the id of the item under the given mouse position or -1 if none
+    int contains_mouse(const Vec2d& mouse_pos, const GLCanvas3D& parent) const;
     int contains_mouse_horizontal(const Vec2d& mouse_pos, const GLCanvas3D& parent) const;
     int contains_mouse_vertical(const Vec2d& mouse_pos, const GLCanvas3D& parent) const;
 
-    void render_horizontal(const GLCanvas3D& parent) const;
-    void render_vertical(const GLCanvas3D& parent) const;
-#else
-    int contains_mouse_horizontal(const Vec2d& mouse_pos) const;
-    int contains_mouse_vertical(const Vec2d& mouse_pos) const;
+    void render_background(float left, float top, float right, float bottom, float border_w, float border_h) const;
+    void render_horizontal(const GLCanvas3D& parent);
+    void render_vertical(const GLCanvas3D& parent);
 
-    void render_horizontal() const;
-    void render_vertical() const;
-#endif // ENABLE_TOOLBAR_BACKGROUND_TEXTURE
+    bool generate_icons_texture();
+
+    // returns true if any item changed its state
+    bool update_items_visibility();
+    // returns true if any item changed its state
+    bool update_items_enabled_state();
 };
-
-#if !ENABLE_TOOLBAR_BACKGROUND_TEXTURE
-class GLRadioToolbarItem
-{
-public:
-    struct Data
-    {
-        std::string name;
-        std::string tooltip;
-        unsigned int sprite_id;
-        wxEventType action_event;
-
-        Data();
-    };
-
-    enum EState : unsigned char
-    {
-        Normal,
-        Pressed,
-        Hover,
-        HoverPressed,
-        Num_States
-    };
-
-private:
-    EState m_state;
-    Data m_data;
-
-public:
-    GLRadioToolbarItem(const Data& data);
-
-    EState get_state() const;
-    void set_state(EState state);
-
-    const std::string& get_name() const;
-    const std::string& get_tooltip() const;
-
-    bool is_hovered() const;
-    bool is_pressed() const;
-
-    void do_action(wxEvtHandler *target);
-
-    void render(unsigned int tex_id, float left, float right, float bottom, float top, unsigned int texture_size, unsigned int border_size, unsigned int icon_size, unsigned int gap_size) const;
-
-private:
-    GLTexture::Quad_UVs get_uvs(unsigned int texture_size, unsigned int border_size, unsigned int icon_size, unsigned int gap_size) const;
-};
-
-class GLRadioToolbar
-{
-    typedef std::vector<GLRadioToolbarItem*> ItemsList;
-
-    ItemsIconsTexture m_icons_texture;
-
-    ItemsList m_items;
-    float m_top;
-    float m_left;
-
-public:
-    GLRadioToolbar();
-    ~GLRadioToolbar();
-
-    bool init(const std::string& icons_texture_filename, unsigned int items_icon_size, unsigned int items_icon_border_size, unsigned int items_icon_gap_size);
-
-    bool add_item(const GLRadioToolbarItem::Data& data);
-
-    float get_height() const;
-
-    void set_position(float top, float left);
-    void set_selection(const std::string& name);
-
-    // returns the id of the item under the given mouse position or -1 if none
-    int contains_mouse(const Vec2d& mouse_pos, const GLCanvas3D& parent) const;
-
-    std::string update_hover_state(const Vec2d& mouse_pos, GLCanvas3D& parent);
-
-    void do_action(unsigned int item_id, GLCanvas3D& parent);
-
-    void render(const GLCanvas3D& parent) const;
-};
-#endif // !ENABLE_TOOLBAR_BACKGROUND_TEXTURE
 
 } // namespace GUI
 } // namespace Slic3r

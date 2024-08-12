@@ -1,17 +1,38 @@
+///|/ Copyright (c) Prusa Research 2018 - 2023 Enrico Turri @enricoturri1966, Tomáš Mészáros @tamasmeszaros, Lukáš Matěna @lukasmatena, Oleksandra Iushchenko @YuSanka, Filip Sykala @Jony01, Vojtěch Bubník @bubnikv, Lukáš Hejl @hejllukas, David Kocík @kocikdav, Vojtěch Král @vojtechkral
+///|/ Copyright (c) BambuStudio 2023 manch1n @manch1n
+///|/
+///|/ PrusaSlicer is released under the terms of the AGPLv3 or higher
+///|/
 #ifndef slic3r_GLCanvas3D_hpp_
 #define slic3r_GLCanvas3D_hpp_
 
 #include <stddef.h>
+#include <memory>
+#include <chrono>
+#include <cstdint>
 
-#include "3DScene.hpp"
 #include "GLToolbar.hpp"
 #include "Event.hpp"
+#include "Selection.hpp"
+#include "Gizmos/GLGizmosManager.hpp"
+#include "GUI_ObjectLayers.hpp"
+#include "GLSelectionRectangle.hpp"
+#include "MeshUtils.hpp"
+#include "libslic3r/GCode/GCodeProcessor.hpp"
+#include "GCodeViewer.hpp"
+#include "Camera.hpp"
+#include "SceneRaycaster.hpp"
+#include "GUI_Utils.hpp"
+
+#include "libslic3r/Arrange/ArrangeSettingsDb_AppCfg.hpp"
+#include "ArrangeSettingsDialogImgui.hpp"
+
+#include "libslic3r/Slicing.hpp"
 
 #include <float.h>
 
 #include <wx/timer.h>
 
-class wxWindow;
 class wxSizeEvent;
 class wxIdleEvent;
 class wxKeyEvent;
@@ -19,259 +40,160 @@ class wxMouseEvent;
 class wxTimerEvent;
 class wxPaintEvent;
 class wxGLCanvas;
+class wxGLContext;
 
-class GLUquadric;
-typedef class GLUquadric GLUquadricObj;
+// Support for Retina OpenGL on Mac OS.
+// wxGTK3 seems to simulate OSX behavior in regard to HiDPI scaling support, enable it as well.
+#define ENABLE_RETINA_GL (__APPLE__ || __WXGTK3__)
 
 namespace Slic3r {
 
-class GLShader;
-class ExPolygon;
 class BackgroundSlicingProcess;
+class BuildVolume;
+struct ThumbnailData;
+struct ThumbnailsParams;
+class ModelObject;
+class ModelInstance;
+class PrintObject;
+class Print;
+class SLAPrint;
+namespace CustomGCode { struct Item; }
 
 namespace GUI {
 
-class GLGizmoBase;
+class Bed3D;
 
-class GeometryBuffer
-{
-    std::vector<float> m_vertices;
-    std::vector<float> m_tex_coords;
-
-public:
-    bool set_from_triangles(const Polygons& triangles, float z, bool generate_tex_coords);
-    bool set_from_lines(const Lines& lines, float z);
-
-    const float* get_vertices() const;
-    const float* get_tex_coords() const;
-
-    unsigned int get_vertices_count() const;
-};
+#if ENABLE_RETINA_GL
+class RetinaHelper;
+#endif
 
 class Size
 {
-    int m_width;
-    int m_height;
+    int m_width{ 0 };
+    int m_height{ 0 };
+    float m_scale_factor{ 1.0f };
 
 public:
-    Size();
-    Size(int width, int height);
+    Size() = default;
+    Size(int width, int height, float scale_factor = 1.0f) : m_width(width), m_height(height), m_scale_factor(scale_factor) {}
 
-    int get_width() const;
-    void set_width(int width);
+    int get_width() const { return m_width; }
+    void set_width(int width) { m_width = width; }
 
-    int get_height() const;
-    void set_height(int height);
+    int get_height() const { return m_height; }
+    void set_height(int height) { m_height = height; }
+
+    float get_scale_factor() const { return m_scale_factor; }
+    void set_scale_factor(float factor) { m_scale_factor = factor; }
 };
 
-class Rect
+class RenderTimerEvent : public wxEvent
 {
-    float m_left;
-    float m_top;
-    float m_right;
-    float m_bottom;
-
 public:
-    Rect();
-    Rect(float left, float top, float right, float bottom);
+    RenderTimerEvent(wxEventType type, wxTimer& timer)
+        : wxEvent(timer.GetId(), type),
+        m_timer(&timer)
+    {
+        SetEventObject(timer.GetOwner());
+    }
+    int GetInterval() const { return m_timer->GetInterval(); }
+    wxTimer& GetTimer() const { return *m_timer; }
 
-    float get_left() const;
-    void set_left(float left);
+    virtual wxEvent* Clone() const { return new RenderTimerEvent(*this); }
+    virtual wxEventCategory GetEventCategory() const  { return wxEVT_CATEGORY_TIMER; }
+private:
+    wxTimer* m_timer;
+};
 
-    float get_top() const;
-    void set_top(float top);
+class  ToolbarHighlighterTimerEvent : public wxEvent
+{
+public:
+    ToolbarHighlighterTimerEvent(wxEventType type, wxTimer& timer)
+        : wxEvent(timer.GetId(), type),
+        m_timer(&timer)
+    {
+        SetEventObject(timer.GetOwner());
+    }
+    int GetInterval() const { return m_timer->GetInterval(); }
+    wxTimer& GetTimer() const { return *m_timer; }
 
-    float get_right() const;
-    void set_right(float right);
+    virtual wxEvent* Clone() const { return new ToolbarHighlighterTimerEvent(*this); }
+    virtual wxEventCategory GetEventCategory() const { return wxEVT_CATEGORY_TIMER; }
+private:
+    wxTimer* m_timer;
+};
 
-    float get_bottom() const;
-    void set_bottom(float bottom);
+
+class  GizmoHighlighterTimerEvent : public wxEvent
+{
+public:
+    GizmoHighlighterTimerEvent(wxEventType type, wxTimer& timer)
+        : wxEvent(timer.GetId(), type),
+        m_timer(&timer)
+    {
+        SetEventObject(timer.GetOwner());
+    }
+    int GetInterval() const { return m_timer->GetInterval(); }
+    wxTimer& GetTimer() const { return *m_timer; }
+
+    virtual wxEvent* Clone() const { return new GizmoHighlighterTimerEvent(*this); }
+    virtual wxEventCategory GetEventCategory() const { return wxEVT_CATEGORY_TIMER; }
+private:
+    wxTimer* m_timer;
 };
 
 wxDECLARE_EVENT(EVT_GLCANVAS_OBJECT_SELECT, SimpleEvent);
 
 using Vec2dEvent = Event<Vec2d>;
+// _bool_ value is used as a indicator of selection in the 3DScene
+using RBtnEvent = Event<std::pair<Vec2d, bool>>;
 template <size_t N> using Vec2dsEvent = ArrayEvent<Vec2d, N>;
 
 using Vec3dEvent = Event<Vec3d>;
 template <size_t N> using Vec3dsEvent = ArrayEvent<Vec3d, N>;
 
-#if ENABLE_REMOVE_TABS_FROM_PLATER
-wxDECLARE_EVENT(EVT_GLCANVAS_INIT, SimpleEvent);
-#endif // ENABLE_REMOVE_TABS_FROM_PLATER
+using HeightProfileSmoothEvent = Event<HeightProfileSmoothingParams>;
+using HeightProfileAdaptiveEvent = Event<HeightProfileAdaptiveParams>;
+
 wxDECLARE_EVENT(EVT_GLCANVAS_SCHEDULE_BACKGROUND_PROCESS, SimpleEvent);
-wxDECLARE_EVENT(EVT_GLCANVAS_VIEWPORT_CHANGED, SimpleEvent);
-wxDECLARE_EVENT(EVT_GLCANVAS_RIGHT_CLICK, Vec2dEvent);
-wxDECLARE_EVENT(EVT_GLCANVAS_MODEL_UPDATE, SimpleEvent);
+wxDECLARE_EVENT(EVT_GLCANVAS_RIGHT_CLICK, RBtnEvent);
 wxDECLARE_EVENT(EVT_GLCANVAS_REMOVE_OBJECT, SimpleEvent);
 wxDECLARE_EVENT(EVT_GLCANVAS_ARRANGE, SimpleEvent);
+wxDECLARE_EVENT(EVT_GLCANVAS_SELECT_ALL, SimpleEvent);
+wxDECLARE_EVENT(EVT_GLCANVAS_QUESTION_MARK, SimpleEvent);
 wxDECLARE_EVENT(EVT_GLCANVAS_INCREASE_INSTANCES, Event<int>); // data: +1 => increase, -1 => decrease
 wxDECLARE_EVENT(EVT_GLCANVAS_INSTANCE_MOVED, SimpleEvent);
+wxDECLARE_EVENT(EVT_GLCANVAS_FORCE_UPDATE, SimpleEvent);
 wxDECLARE_EVENT(EVT_GLCANVAS_WIPETOWER_MOVED, Vec3dEvent);
+wxDECLARE_EVENT(EVT_GLCANVAS_INSTANCE_ROTATED, SimpleEvent);
+wxDECLARE_EVENT(EVT_GLCANVAS_RESET_SKEW, SimpleEvent);
+wxDECLARE_EVENT(EVT_GLCANVAS_INSTANCE_SCALED, SimpleEvent);
+wxDECLARE_EVENT(EVT_GLCANVAS_INSTANCE_MIRRORED, SimpleEvent);
+wxDECLARE_EVENT(EVT_GLCANVAS_WIPETOWER_ROTATED, Vec3dEvent);
 wxDECLARE_EVENT(EVT_GLCANVAS_ENABLE_ACTION_BUTTONS, Event<bool>);
 wxDECLARE_EVENT(EVT_GLCANVAS_UPDATE_GEOMETRY, Vec3dsEvent<2>);
+wxDECLARE_EVENT(EVT_GLCANVAS_MOUSE_DRAGGING_STARTED, SimpleEvent);
 wxDECLARE_EVENT(EVT_GLCANVAS_MOUSE_DRAGGING_FINISHED, SimpleEvent);
+wxDECLARE_EVENT(EVT_GLCANVAS_UPDATE_BED_SHAPE, SimpleEvent);
+wxDECLARE_EVENT(EVT_GLCANVAS_TAB, SimpleEvent);
+wxDECLARE_EVENT(EVT_GLCANVAS_RESETGIZMOS, SimpleEvent);
+wxDECLARE_EVENT(EVT_GLCANVAS_MOVE_SLIDERS, wxKeyEvent);
+wxDECLARE_EVENT(EVT_GLCANVAS_EDIT_COLOR_CHANGE, wxKeyEvent);
+wxDECLARE_EVENT(EVT_GLCANVAS_JUMP_TO, wxKeyEvent);
+wxDECLARE_EVENT(EVT_GLCANVAS_UNDO, SimpleEvent);
+wxDECLARE_EVENT(EVT_GLCANVAS_REDO, SimpleEvent);
+wxDECLARE_EVENT(EVT_GLCANVAS_COLLAPSE_SIDEBAR, SimpleEvent);
+wxDECLARE_EVENT(EVT_GLCANVAS_RESET_LAYER_HEIGHT_PROFILE, SimpleEvent);
+wxDECLARE_EVENT(EVT_GLCANVAS_ADAPTIVE_LAYER_HEIGHT_PROFILE, HeightProfileAdaptiveEvent);
+wxDECLARE_EVENT(EVT_GLCANVAS_SMOOTH_LAYER_HEIGHT_PROFILE, HeightProfileSmoothEvent);
+wxDECLARE_EVENT(EVT_GLCANVAS_RELOAD_FROM_DISK, SimpleEvent);
+wxDECLARE_EVENT(EVT_GLCANVAS_RENDER_TIMER, wxTimerEvent/*RenderTimerEvent*/);
+wxDECLARE_EVENT(EVT_GLCANVAS_TOOLBAR_HIGHLIGHTER_TIMER, wxTimerEvent);
+wxDECLARE_EVENT(EVT_GLCANVAS_GIZMO_HIGHLIGHTER_TIMER, wxTimerEvent);
 
 class GLCanvas3D
 {
-    struct GCodePreviewVolumeIndex
-    {
-        enum EType
-        {
-            Extrusion,
-            Travel,
-            Retraction,
-            Unretraction,
-            Shell,
-            Num_Geometry_Types
-        };
-
-        struct FirstVolume
-        {
-            EType type;
-            unsigned int flag;
-            // Index of the first volume in a GLVolumeCollection.
-            unsigned int id;
-
-            FirstVolume(EType type, unsigned int flag, unsigned int id) : type(type), flag(flag), id(id) {}
-        };
-
-        std::vector<FirstVolume> first_volumes;
-
-        void reset() { first_volumes.clear(); }
-    };
-
-    struct Camera
-    {
-        enum EType : unsigned char
-        {
-            Unknown,
-//            Perspective,
-            Ortho,
-            Num_types
-        };
-
-        EType type;
-        float zoom;
-        float phi;
-//        float distance;
-#if !ENABLE_CONSTRAINED_CAMERA_TARGET
-        Vec3d target;
-#endif // ENABLE_CONSTRAINED_CAMERA_TARGET
-
-    private:
-#if ENABLE_CONSTRAINED_CAMERA_TARGET
-        Vec3d m_target;
-        BoundingBoxf3 m_scene_box;
-#endif // ENABLE_CONSTRAINED_CAMERA_TARGET
-        float m_theta;
-
-    public:
-        Camera();
-
-        std::string get_type_as_string() const;
-
-        float get_theta() const { return m_theta; }
-        void set_theta(float theta);
-
-#if ENABLE_CONSTRAINED_CAMERA_TARGET
-        const Vec3d& get_target() const { return m_target; }
-        void set_target(const Vec3d& target, GLCanvas3D& canvas);
-
-        const BoundingBoxf3& get_scene_box() const { return m_scene_box; }
-        void set_scene_box(const BoundingBoxf3& box, GLCanvas3D& canvas);
-#endif // ENABLE_CONSTRAINED_CAMERA_TARGET
-    };
-
-    class Bed
-    {
-    public:
-        enum EType : unsigned char
-        {
-            MK2,
-            MK3,
-            SL1,
-            Custom,
-            Num_Types
-        };
-
-    private:
-        EType m_type;
-        Pointfs m_shape;
-        BoundingBoxf3 m_bounding_box;
-        Polygon m_polygon;
-        GeometryBuffer m_triangles;
-        GeometryBuffer m_gridlines;
-        mutable GLTexture m_top_texture;
-        mutable GLTexture m_bottom_texture;
-
-    public:
-        Bed();
-
-        bool is_prusa() const;
-        bool is_custom() const;
-
-        const Pointfs& get_shape() const;
-        // Return true if the bed shape changed, so the calee will update the UI.
-        bool set_shape(const Pointfs& shape);
-
-        const BoundingBoxf3& get_bounding_box() const;
-        bool contains(const Point& point) const;
-        Point point_projection(const Point& point) const;
-
-        void render(float theta) const;
-
-    private:
-        void _calc_bounding_box();
-        void _calc_triangles(const ExPolygon& poly);
-        void _calc_gridlines(const ExPolygon& poly, const BoundingBox& bed_bbox);
-        EType _detect_type() const;
-        void _render_prusa(const std::string &key, float theta) const;
-        void _render_custom() const;
-        static bool _are_equal(const Pointfs& bed_1, const Pointfs& bed_2);
-    };
-
-    struct Axes
-    {
-        static const double Radius;
-        static const double ArrowBaseRadius;
-        static const double ArrowLength;
-        Vec3d origin;
-        Vec3d length;
-        GLUquadricObj* m_quadric;
-
-        Axes();
-        ~Axes();
-
-        void render() const;
-
-    private:
-        void render_axis(double length) const;
-    };
-
-    class Shader
-    {
-        GLShader* m_shader;
-
-    public:
-        Shader();
-        ~Shader();
-
-        bool init(const std::string& vertex_shader_filename, const std::string& fragment_shader_filename);
-
-        bool is_initialized() const;
-
-        bool start_using() const;
-        void stop_using() const;
-
-        void set_uniform(const std::string& name, float value) const;
-        void set_uniform(const std::string& name, const float* matrix) const;
-
-        const GLShader* get_shader() const;
-
-    private:
-        void _reset();
-    };
+    static const double DefaultCameraZoomToBoxMarginFactor;
 
     class LayersEditing
     {
@@ -281,56 +203,113 @@ class GLCanvas3D
             Unknown,
             Editing,
             Completed,
+            Paused,
             Num_States
         };
 
+        static const float THICKNESS_BAR_WIDTH;
+
     private:
-        bool m_use_legacy_opengl;
-        bool m_enabled;
-        Shader m_shader;
-        unsigned int m_z_texture_id;
-        mutable GLTexture m_tooltip_texture;
-        mutable GLTexture m_reset_texture;
+        bool                        m_enabled{ false };
+        unsigned int                m_z_texture_id{ 0 };
+        // Not owned by LayersEditing.
+        const DynamicPrintConfig   *m_config{ nullptr };
+        // ModelObject for the currently selected object (Model::objects[last_object_id]).
+        const ModelObject          *m_model_object{ nullptr };
+        // Maximum z of the currently selected object (Model::objects[last_object_id]).
+        float                       m_object_max_z{ 0.0f };
+        // Owned by LayersEditing.
+        std::shared_ptr<SlicingParameters> m_slicing_parameters{ nullptr };
+        std::vector<double>         m_layer_height_profile;
+        bool                        m_layer_height_profile_modified{ false };
+
+        mutable HeightProfileAdaptiveParams m_adaptive_params;
+        mutable HeightProfileSmoothingParams m_smooth_params;
+        
+        static float                s_overlay_window_width;
+
+        struct LayersTexture
+        {
+            // Texture data
+            std::vector<char>   data;
+            // Width of the texture, top level.
+            size_t              width{ 0 };
+            // Height of the texture, top level.
+            size_t              height{ 0 };
+            // For how many levels of detail is the data allocated?
+            size_t              levels{ 0 };
+            // Number of texture cells allocated for the height texture.
+            size_t              cells{ 0 };
+            // Does it need to be refreshed?
+            bool                valid{ false };
+        };
+        LayersTexture   m_layers_texture;
 
     public:
-        EState state;
-        float band_width;
-        float strength;
-        int last_object_id;
-        float last_z;
-        unsigned int last_action;
+        EState state{ Unknown };
+        float band_width{ 2.0f };
+        //float strength{ 0.005f };
+        int last_object_id{ -1 };
+        float last_z{ 0.0f };
+        LayerHeightEditActionType last_action{ LAYER_HEIGHT_EDIT_ACTION_INCREASE };
 
-        LayersEditing();
+        struct Profile
+        {
+            GLModel baseline;
+            GLModel profile;
+            GLModel background;
+            struct OldCanvasWidth
+            {
+                float background{ 0.0f };
+                float baseline{ 0.0f };
+                float profile{ 0.0f };
+            };
+            OldCanvasWidth old_canvas_width;
+            std::vector<double> old_layer_height_profile;
+        };
+        Profile m_profile;
+
+        LayersEditing() = default;
         ~LayersEditing();
 
-        bool init(const std::string& vertex_shader_filename, const std::string& fragment_shader_filename);
+        void init();
+
+        void set_config(const DynamicPrintConfig* config);
+        void select_object(const Model &model, int object_id);
 
         bool is_allowed() const;
-        void set_use_legacy_opengl(bool use_legacy_opengl);
 
         bool is_enabled() const;
         void set_enabled(bool enabled);
 
-        unsigned int get_z_texture_id() const;
+        void render_overlay(const GLCanvas3D& canvas);
+        void render_volumes(const GLCanvas3D& canvas, const GLVolumeCollection& volumes);
 
-        void render(const GLCanvas3D& canvas, const PrintObject& print_object, const GLVolume& volume) const;
-
-        int get_shader_program_id() const;
+		void adjust_layer_height_profile();
+		void accept_changes(GLCanvas3D& canvas);
+        void reset_layer_height_profile(GLCanvas3D& canvas);
+        void adaptive_layer_height_profile(GLCanvas3D& canvas, const HeightProfileAdaptiveParams& adaptative_params);
+        void smooth_layer_height_profile(GLCanvas3D& canvas, const HeightProfileSmoothingParams& smoothing_params);
 
         static float get_cursor_z_relative(const GLCanvas3D& canvas);
         static bool bar_rect_contains(const GLCanvas3D& canvas, float x, float y);
-        static bool reset_rect_contains(const GLCanvas3D& canvas, float x, float y);
         static Rect get_bar_rect_screen(const GLCanvas3D& canvas);
-        static Rect get_reset_rect_screen(const GLCanvas3D& canvas);
-        static Rect get_bar_rect_viewport(const GLCanvas3D& canvas);
-        static Rect get_reset_rect_viewport(const GLCanvas3D& canvas);
+        static float get_overlay_window_width() { return LayersEditing::s_overlay_window_width; }
+
+        float object_max_z() const { return m_object_max_z; }
+
+        std::string get_tooltip(const GLCanvas3D& canvas) const;
+
+        std::pair<SlicingParameters, const std::vector<double>> get_layers_height_data();
 
     private:
-        bool _is_initialized() const;
-        void _render_tooltip_texture(const GLCanvas3D& canvas, const Rect& bar_rect, const Rect& reset_rect) const;
-        void _render_reset_texture(const Rect& reset_rect) const;
-        void _render_active_object_annotations(const GLCanvas3D& canvas, const GLVolume& volume, const PrintObject& print_object, const Rect& bar_rect) const;
-        void _render_profile(const PrintObject& print_object, const Rect& bar_rect) const;
+        bool is_initialized() const;
+        void generate_layer_height_texture();
+        void render_active_object_annotations(const GLCanvas3D& canvas);
+        void render_profile(const GLCanvas3D& canvas);
+        void update_slicing_parameters();
+
+        static float thickness_bar_width(const GLCanvas3D &canvas);        
     };
 
     struct Mouse
@@ -339,613 +318,539 @@ class GLCanvas3D
         {
             static const Point Invalid_2D_Point;
             static const Vec3d Invalid_3D_Point;
+            static const int MoveThresholdPx;
 
             Point start_position_2D;
             Vec3d start_position_3D;
             int move_volume_idx;
+            bool move_requires_threshold;
+            Point move_start_threshold_position_2D;
 
         public:
             Drag();
         };
 
         bool dragging;
-        bool left_down;
         Vec2d position;
         Vec3d scene_position;
         Drag drag;
-        bool ignore_up_event;
+        bool ignore_left_up;
 
         Mouse();
 
-        void set_start_position_2D_as_invalid();
-        void set_start_position_3D_as_invalid();
+        void set_start_position_2D_as_invalid() { drag.start_position_2D = Drag::Invalid_2D_Point; }
+        void set_start_position_3D_as_invalid() { drag.start_position_3D = Drag::Invalid_3D_Point; }
+        void set_move_start_threshold_position_2D_as_invalid() { drag.move_start_threshold_position_2D = Drag::Invalid_2D_Point; }
 
-        bool is_start_position_2D_defined() const;
-        bool is_start_position_3D_defined() const;
-    };
-
-public:
-    class Selection
-    {
-    public:
-        typedef std::set<unsigned int> IndicesList;
-
-        enum EMode : unsigned char
-        {
-#if ENABLE_MODELVOLUME_TRANSFORM
-            Volume,
-            Instance
-#else
-            Volume,
-            Instance,
-            Object
-#endif // ENABLE_MODELVOLUME_TRANSFORM
-        };
-
-        enum EType : unsigned char
-        {
-            Invalid,
-            Empty,
-            WipeTower,
-            SingleModifier,
-            MultipleModifier,
-            SingleVolume,
-            MultipleVolume,
-            SingleFullObject,
-            MultipleFullObject,
-            SingleFullInstance,
-            MultipleFullInstance,
-            Mixed
-        };
-
-    private:
-        struct VolumeCache
-        {
-        private:
-#if ENABLE_MODELVOLUME_TRANSFORM
-            struct TransformCache
-            {
-                Vec3d position;
-                Vec3d rotation;
-                Vec3d scaling_factor;
-                Vec3d mirror;
-                Transform3d rotation_matrix;
-                Transform3d scale_matrix;
-                Transform3d mirror_matrix;
-
-                TransformCache();
-                explicit TransformCache(const Geometry::Transformation& transform);
-            };
-
-            TransformCache m_volume;
-            TransformCache m_instance;
-#else
-            Vec3d m_position;
-            Vec3d m_rotation;
-            Vec3d m_scaling_factor;
-            Transform3d m_rotation_matrix;
-            Transform3d m_scale_matrix;
-#endif // ENABLE_MODELVOLUME_TRANSFORM
-
-        public:
-#if ENABLE_MODELVOLUME_TRANSFORM
-            VolumeCache() {}
-            VolumeCache(const Geometry::Transformation& volume_transform, const Geometry::Transformation& instance_transform);
-#else
-            VolumeCache();
-            VolumeCache(const Vec3d& position, const Vec3d& rotation, const Vec3d& scaling_factor);
-#endif // ENABLE_MODELVOLUME_TRANSFORM
-
-#if ENABLE_MODELVOLUME_TRANSFORM
-            const Vec3d& get_volume_position() const { return m_volume.position; }
-            const Vec3d& get_volume_rotation() const { return m_volume.rotation; }
-            const Vec3d& get_volume_scaling_factor() const { return m_volume.scaling_factor; }
-            const Vec3d& get_volume_mirror() const { return m_volume.mirror; }
-            const Transform3d& get_volume_rotation_matrix() const { return m_volume.rotation_matrix; }
-            const Transform3d& get_volume_scale_matrix() const { return m_volume.scale_matrix; }
-            const Transform3d& get_volume_mirror_matrix() const { return m_volume.mirror_matrix; }
-
-            const Vec3d& get_instance_position() const { return m_instance.position; }
-            const Vec3d& get_instance_rotation() const { return m_instance.rotation; }
-            const Vec3d& get_instance_scaling_factor() const { return m_instance.scaling_factor; }
-            const Vec3d& get_instance_mirror() const { return m_instance.mirror; }
-            const Transform3d& get_instance_rotation_matrix() const { return m_instance.rotation_matrix; }
-            const Transform3d& get_instance_scale_matrix() const { return m_instance.scale_matrix; }
-            const Transform3d& get_instance_mirror_matrix() const { return m_instance.mirror_matrix; }
-#else
-            const Vec3d& get_position() const { return m_position; }
-            const Vec3d& get_rotation() const { return m_rotation; }
-            const Vec3d& get_scaling_factor() const { return m_scaling_factor; }
-            const Transform3d& get_rotation_matrix() const { return m_rotation_matrix; }
-            const Transform3d& get_scale_matrix() const { return m_scale_matrix; }
-#endif // ENABLE_MODELVOLUME_TRANSFORM
-        };
-
-        typedef std::map<unsigned int, VolumeCache> VolumesCache;
-        typedef std::set<int> InstanceIdxsList;
-        typedef std::map<int, InstanceIdxsList> ObjectIdxsToInstanceIdxsMap;
-
-        struct Cache
-        {
-            // Cache of GLVolume derived transformation matrices, valid during mouse dragging.
-            VolumesCache volumes_data;
-            // Center of the dragged selection, valid during mouse dragging.
-            Vec3d dragging_center;
-            // Map from indices of ModelObject instances in Model::objects
-            // to a set of indices of ModelVolume instances in ModelObject::instances
-            // Here the index means a position inside the respective std::vector, not ModelID.
-            ObjectIdxsToInstanceIdxsMap content;
-        };
-
-        // Volumes owned by GLCanvas3D.
-        GLVolumePtrs* m_volumes;
-        // Model, not owned.
-        Model* m_model;
-
-        bool m_valid;
-        EMode m_mode;
-        EType m_type;
-        // set of indices to m_volumes
-        IndicesList m_list;
-        Cache m_cache;
-        mutable BoundingBoxf3 m_bounding_box;
-        mutable bool m_bounding_box_dirty;
-
-    public:
-        Selection();
-
-        void set_volumes(GLVolumePtrs* volumes);
-
-        Model* get_model() const { return m_model; }
-        void set_model(Model* model);
-
-        EMode get_mode() const { return m_mode; }
-        void set_mode(EMode mode) { m_mode = mode; }
-
-        void add(unsigned int volume_idx, bool as_single_selection = true);
-        void remove(unsigned int volume_idx);
-
-        void add_object(unsigned int object_idx, bool as_single_selection = true);
-        void remove_object(unsigned int object_idx);
-
-        void add_instance(unsigned int object_idx, unsigned int instance_idx, bool as_single_selection = true);
-        void remove_instance(unsigned int object_idx, unsigned int instance_idx);
-
-        void add_volume(unsigned int object_idx, unsigned int volume_idx, int instance_idx, bool as_single_selection = true);
-        void remove_volume(unsigned int object_idx, unsigned int volume_idx);
-
-        void add_all();
-
-        // Update the selection based on the map from old indices to new indices after m_volumes changed.
-        // If the current selection is by instance, this call may select newly added volumes, if they belong to already selected instances.
-        void volumes_changed(const std::vector<size_t> &map_volume_old_to_new);
-        void clear();
-
-        bool is_empty() const { return m_type == Empty; }
-        bool is_wipe_tower() const { return m_type == WipeTower; }
-        bool is_modifier() const { return (m_type == SingleModifier) || (m_type == MultipleModifier); }
-        bool is_single_modifier() const { return m_type == SingleModifier; }
-        bool is_single_full_instance() const;
-        bool is_multiple_full_instance() const { return m_type == MultipleFullInstance; }
-        bool is_single_full_object() const { return m_type == SingleFullObject; }
-        bool is_multiple_full_object() const { return m_type == MultipleFullObject; }
-        bool is_single_volume() const { return m_type == SingleVolume; }
-        bool is_multiple_volume() const { return m_type == MultipleVolume; }
-        bool is_mixed() const { return m_type == Mixed; }
-        bool is_from_single_instance() const { return get_instance_idx() != -1; }
-        bool is_from_single_object() const;
-
-        bool contains_volume(unsigned int volume_idx) const { return std::find(m_list.begin(), m_list.end(), volume_idx) != m_list.end(); }
-
-        // Returns the the object id if the selection is from a single object, otherwise is -1
-        int get_object_idx() const;
-        // Returns the instance id if the selection is from a single object and from a single instance, otherwise is -1
-        int get_instance_idx() const;
-        // Returns the indices of selected instances.
-        // Can only be called if selection is from a single object.
-        const InstanceIdxsList& get_instance_idxs() const;
-
-        const IndicesList& get_volume_idxs() const { return m_list; }
-        const GLVolume* get_volume(unsigned int volume_idx) const;
-
-        const ObjectIdxsToInstanceIdxsMap& get_content() const { return m_cache.content; }
-
-        unsigned int volumes_count() const { return (unsigned int)m_list.size(); }
-        const BoundingBoxf3& get_bounding_box() const;
-
-        void start_dragging();
-
-        void translate(const Vec3d& displacement);
-        void rotate(const Vec3d& rotation, bool local);
-        void flattening_rotate(const Vec3d& normal);
-        void scale(const Vec3d& scale, bool local);
-        void mirror(Axis axis);
-
-        void translate(unsigned int object_idx, const Vec3d& displacement);
-        void translate(unsigned int object_idx, unsigned int instance_idx, const Vec3d& displacement);
-
-        void erase();
-
-        void render() const;
-
-    private:
-        void _update_valid();
-        void _update_type();
-        void _set_caches();
-        void _add_volume(unsigned int volume_idx);
-        void _add_instance(unsigned int object_idx, unsigned int instance_idx);
-        void _add_object(unsigned int object_idx);
-        void _remove_volume(unsigned int volume_idx);
-        void _remove_instance(unsigned int object_idx, unsigned int instance_idx);
-        void _remove_object(unsigned int object_idx);
-        void _calc_bounding_box() const;
-        void _render_selected_volumes() const;
-        void _render_synchronized_volumes() const;
-        void _render_bounding_box(const BoundingBoxf3& box, float* color) const;
-        void _synchronize_unselected_instances();
-        void _synchronize_unselected_volumes();
-#if ENABLE_ENSURE_ON_BED_WHILE_SCALING
-        void _ensure_on_bed();
-#endif // ENABLE_ENSURE_ON_BED_WHILE_SCALING
-    };
-
-    class ClippingPlane
-    {
-        double m_data[4];
-
-    public:
-        ClippingPlane()
-        {
-            m_data[0] = 0.0;
-            m_data[1] = 0.0;
-            m_data[2] = 1.0;
-            m_data[3] = 0.0;
+        bool is_start_position_2D_defined() const { return (drag.start_position_2D != Drag::Invalid_2D_Point); }
+        bool is_start_position_3D_defined() const { return (drag.start_position_3D != Drag::Invalid_3D_Point); }
+        bool is_move_start_threshold_position_2D_defined() const { return (drag.move_start_threshold_position_2D != Drag::Invalid_2D_Point); }
+        bool is_move_threshold_met(const Point& mouse_pos) const {
+            return (std::abs(mouse_pos(0) - drag.move_start_threshold_position_2D(0)) > Drag::MoveThresholdPx)
+                || (std::abs(mouse_pos(1) - drag.move_start_threshold_position_2D(1)) > Drag::MoveThresholdPx);
         }
-
-        ClippingPlane(const Vec3d& direction, double offset)
-        {
-            Vec3d norm_dir = direction.normalized();
-            m_data[0] = norm_dir(0);
-            m_data[1] = norm_dir(1);
-            m_data[2] = norm_dir(2);
-            m_data[3] = offset;
-        }
-
-        const double* get_data() const { return m_data; }
-    };
-
-private:
-    class Gizmos
-    {
-        static const float OverlayIconsScale;
-        static const float OverlayBorder;
-        static const float OverlayGapY;
-
-    public:
-        enum EType : unsigned char
-        {
-            Undefined,
-            Move,
-            Scale,
-            Rotate,
-            Flatten,
-            Cut,
-            SlaSupports,
-            Num_Types
-        };
-
-    private:
-        bool m_enabled;
-        typedef std::map<EType, GLGizmoBase*> GizmosMap;
-        GizmosMap m_gizmos;
-#if ENABLE_TOOLBAR_BACKGROUND_TEXTURE
-        BackgroundTexture m_background_texture;
-#endif // ENABLE_TOOLBAR_BACKGROUND_TEXTURE
-        EType m_current;
-
-    public:
-        Gizmos();
-        ~Gizmos();
-
-        bool init(GLCanvas3D& parent);
-
-        bool is_enabled() const;
-        void set_enabled(bool enable);
-
-        std::string update_hover_state(const GLCanvas3D& canvas, const Vec2d& mouse_pos, const Selection& selection);
-        void update_on_off_state(const GLCanvas3D& canvas, const Vec2d& mouse_pos, const Selection& selection);
-        void update_on_off_state(const Selection& selection);
-        void reset_all_states();
-
-        void set_hover_id(int id);
-        void enable_grabber(EType type, unsigned int id, bool enable);
-
-        bool overlay_contains_mouse(const GLCanvas3D& canvas, const Vec2d& mouse_pos) const;
-        bool grabber_contains_mouse() const;
-        void update(const Linef3& mouse_ray, bool shift_down, const Point* mouse_pos = nullptr);
-        Rect get_reset_rect_viewport(const GLCanvas3D& canvas) const;
-        EType get_current_type() const;
-
-        bool is_running() const;
-        bool handle_shortcut(int key, const Selection& selection);
-
-        bool is_dragging() const;
-        void start_dragging(const Selection& selection);
-        void stop_dragging();
-
-        Vec3d get_displacement() const;
-
-        Vec3d get_scale() const;
-        void set_scale(const Vec3d& scale);
-
-        Vec3d get_rotation() const;
-        void set_rotation(const Vec3d& rotation);
-
-        Vec3d get_flattening_normal() const;
-
-        void set_flattening_data(const ModelObject* model_object);
-
-#if ENABLE_SLA_SUPPORT_GIZMO_MOD
-        void set_sla_support_data(ModelObject* model_object, const GLCanvas3D::Selection& selection);
-#else
-        void set_model_object_ptr(ModelObject* model_object);
-#endif // ENABLE_SLA_SUPPORT_GIZMO_MOD
-        void clicked_on_object(const Vec2d& mouse_position);
-        void delete_current_grabber(bool delete_all = false);
-
-        void render_current_gizmo(const Selection& selection) const;
-        void render_current_gizmo_for_picking_pass(const Selection& selection) const;
-
-        void render_overlay(const GLCanvas3D& canvas, const Selection& selection) const;
-
-#if !ENABLE_IMGUI
-        void create_external_gizmo_widgets(wxWindow *parent);
-#endif // not ENABLE_IMGUI
-
-    private:
-        void _reset();
-
-        void _render_overlay(const GLCanvas3D& canvas, const Selection& selection) const;
-        void _render_current_gizmo(const Selection& selection) const;
-
-        float _get_total_overlay_height() const;
-#if ENABLE_TOOLBAR_BACKGROUND_TEXTURE
-        float _get_total_overlay_width() const;
-#endif // ENABLE_TOOLBAR_BACKGROUND_TEXTURE
-        GLGizmoBase* _get_current() const;
     };
 
     struct SlaCap
     {
         struct Triangles
         {
-            Pointf3s object;
-            Pointf3s suppports;
+            GLModel object;
+            GLModel supports;
         };
-        typedef std::map<unsigned int, Triangles> ObjectIdToTrianglesMap;
+        typedef std::map<unsigned int, Triangles> ObjectIdToModelsMap;
         double z;
-        ObjectIdToTrianglesMap triangles;
+        ObjectIdToModelsMap triangles;
 
         SlaCap() { reset(); }
         void reset() { z = DBL_MAX; triangles.clear(); }
         bool matches(double z) const { return this->z == z; }
     };
 
-    class WarningTexture : public GUI::GLTexture
-    {
-        static const unsigned char Background_Color[3];
-        static const unsigned char Opacity;
-
-        int m_original_width;
-        int m_original_height;
-
-    public:
-        WarningTexture();
-
-        bool generate(const std::string& msg);
-
-        void render(const GLCanvas3D& canvas) const;
+    enum class EWarning {
+        ObjectOutside,
+        ToolpathOutside,
+        SlaSupportsOutside,
+        SomethingNotShown,
+        PrintWarning,
+        ObjectClashed,
+        GCodeConflict
     };
 
-    class LegendTexture : public GUI::GLTexture
+    class RenderStats
     {
-        static const int Px_Title_Offset = 5;
-        static const int Px_Text_Offset = 5;
-        static const int Px_Square = 20;
-        static const int Px_Square_Contour = 1;
-        static const int Px_Border = Px_Square / 2;
-        static const unsigned char Squares_Border_Color[3];
-        static const unsigned char Default_Background_Color[3];
-        static const unsigned char Error_Background_Color[3];
-        static const unsigned char Opacity;
-
-        int m_original_width;
-        int m_original_height;
-
+    private:
+        std::chrono::time_point<std::chrono::high_resolution_clock> m_measuring_start;
+        int m_fps_out = -1;
+        int m_fps_running = 0;
     public:
-        LegendTexture();
+        void increment_fps_counter() { ++m_fps_running; }
+        int get_fps() { return m_fps_out; }
+        int get_fps_and_reset_if_needed() {
+            auto cur_time = std::chrono::high_resolution_clock::now();
+            int elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(cur_time-m_measuring_start).count();
+            if (elapsed_ms > 1000  || m_fps_out == -1) {
+                m_measuring_start = cur_time;
+                m_fps_out = int (1000. * m_fps_running / elapsed_ms);
+                m_fps_running = 0;
+            }
+            return m_fps_out;
+        }
 
-        bool generate(const GCodePreviewData& preview_data, const std::vector<float>& tool_colors, const GLCanvas3D& canvas, bool use_error_colors);
-
-        void render(const GLCanvas3D& canvas) const;
     };
 
+    class Labels
+    {
+        bool m_enabled{ false };
+        bool m_shown{ false };
+        GLCanvas3D& m_canvas;
+
+    public:
+        explicit Labels(GLCanvas3D& canvas) : m_canvas(canvas) {}
+        void enable(bool enable) { m_enabled = enable; }
+        void show(bool show) { m_shown = m_enabled ? show : false; }
+        bool is_shown() const { return m_shown; }
+        void render(const std::vector<const ModelInstance*>& sorted_instances) const;
+    };
+
+    class Tooltip
+    {
+        std::string m_text;
+        std::chrono::steady_clock::time_point m_start_time;
+        // Indicator that the mouse is inside an ImGUI dialog, therefore the tooltip should be suppressed.
+        bool m_in_imgui = false;
+        float m_cursor_height{ 16.0f };
+
+    public:
+        bool is_empty() const { return m_text.empty(); }
+        void set_text(const std::string& text);
+        void render(const Vec2d& mouse_position, GLCanvas3D& canvas);
+        // Indicates that the mouse is inside an ImGUI dialog, therefore the tooltip should be suppressed.
+        void set_in_imgui(bool b) { m_in_imgui = b; }
+        bool is_in_imgui() const { return m_in_imgui; }
+    };
+
+    class Slope
+    {
+        bool m_enabled{ false };
+        GLVolumeCollection& m_volumes;
+    public:
+        Slope(GLVolumeCollection& volumes) : m_volumes(volumes) {}
+
+        void enable(bool enable) { m_enabled = enable; }
+        bool is_enabled() const { return m_enabled; }
+        void use(bool use) { m_volumes.set_slope_active(m_enabled ? use : false); }
+        bool is_used() const { return m_volumes.is_slope_active(); }
+        void set_normal_angle(float angle_in_deg) const {
+            m_volumes.set_slope_normal_z(-::cos(Geometry::deg2rad(90.0f - angle_in_deg)));
+        }
+    };
+
+    class RenderTimer : public wxTimer {
+    private:
+        virtual void Notify() override;
+    };
+
+    class ToolbarHighlighterTimer : public wxTimer {
+    private:
+        virtual void Notify() override;
+    };
+
+    class GizmoHighlighterTimer : public wxTimer {
+    private:
+        virtual void Notify() override;
+    };
+
+public:
+    enum ECursorType : unsigned char
+    {
+        Standard,
+        Cross
+    };
+
+/*
+    struct ArrangeSettings
+    {
+        float previously_used_distance = 6.; // last distance used when last pressed on "arrange". Used when "duplicate_distance" is set to 0
+        float distance           = 6.;
+        float distance_from_bed  = 0.f;
+//        float distance_seq_print = 6.;    // Used when sequential print is ON
+//        float distance_sla       = 6.;
+        float accuracy           = 0.65f; // Unused currently
+        bool  enable_rotation    = false;
+        int   alignment          = 0;
+        int   geometry_handling  = 0;
+        int   strategy = 0;
+    };
+*/
+
+    enum class ESLAViewType
+    {
+        Original,
+        Processed
+    };
+
+private:
     wxGLCanvas* m_canvas;
     wxGLContext* m_context;
+    SceneRaycaster m_scene_raycaster;
+    Bed3D &m_bed;
+#if ENABLE_RETINA_GL
+    std::unique_ptr<RetinaHelper> m_retina_helper;
+#endif
     bool m_in_render;
-    LegendTexture m_legend_texture;
-    WarningTexture m_warning_texture;
     wxTimer m_timer;
-    Camera m_camera;
-    Bed m_bed;
-    Axes m_axes;
     LayersEditing m_layers_editing;
-    Shader m_shader;
     Mouse m_mouse;
-    mutable Gizmos m_gizmos;
-    mutable GLToolbar m_toolbar;
-#if ENABLE_REMOVE_TABS_FROM_PLATER
-#if ENABLE_TOOLBAR_BACKGROUND_TEXTURE
-    GLToolbar* m_view_toolbar;
-#else
-    GLRadioToolbar* m_view_toolbar;
-#endif // ENABLE_TOOLBAR_BACKGROUND_TEXTURE
-#endif // ENABLE_REMOVE_TABS_FROM_PLATER
-    ClippingPlane m_clipping_planes[2];
+    GLGizmosManager m_gizmos;
+    GLToolbar m_main_toolbar;
+    GLToolbar m_undoredo_toolbar;
+    std::array<ClippingPlane, 2> m_clipping_planes;
+    ClippingPlane m_camera_clipping_plane;
     bool m_use_clipping_planes;
-    mutable SlaCap m_sla_caps[2];
+    std::array<SlaCap, 2> m_sla_caps;
+    std::string m_sidebar_field;
+    // when true renders an extra frame by not resetting m_dirty to false
+    // see request_extra_frame()
+    bool m_extra_frame_requested;
+    bool m_event_handlers_bound{ false };
 
-    mutable GLVolumeCollection m_volumes;
+    bool m_show_objects = true;
+    GLVolumeCollection m_volumes;
+    bool m_show_gcode = true;
+#if ENABLE_OPENGL_ES
+    TriangleMesh m_wipe_tower_mesh;
+#endif // ENABLE_OPENGL_ES
+    GCodeViewer m_gcode_viewer;
+
+    RenderTimer m_render_timer;
+
     Selection m_selection;
-    DynamicPrintConfig* m_config;
+    const DynamicPrintConfig* m_config;
     Model* m_model;
     BackgroundSlicingProcess *m_process;
+    bool m_requires_check_outside_state{ false };
+
+    std::array<unsigned int, 2> m_old_size{ 0, 0 };
 
     // Screen is only refreshed from the OnIdle handler if it is dirty.
     bool m_dirty;
+    std::time_t last_showned_gcode = 0;
+    std::time_t last_showned_print = 0;
     bool m_initialized;
-    bool m_use_VBOs;
-    bool m_force_zoom_to_bed_enabled;
     bool m_apply_zoom_to_volumes_filter;
-    mutable int m_hover_volume_id;
-    bool m_toolbar_action_running;
-    bool m_warning_texture_enabled;
-    bool m_legend_texture_enabled;
     bool m_picking_enabled;
     bool m_moving_enabled;
-    bool m_shader_enabled;
     bool m_dynamic_background_enabled;
     bool m_multisample_allowed;
-    bool m_regenerate_volumes;
     bool m_moving;
+    bool m_tab_down;
+    ECursorType m_cursor_type;
+    GLSelectionRectangle m_rectangle_selection;
+    std::vector<int> m_hover_volume_idxs;
 
-    std::string m_color_by;
+    // Following variable is obsolete and it should be safe to remove it.
+    // I just don't want to do it now before a release (Lukas Matena 24.3.2019)
+    bool m_render_sla_auxiliaries;
 
     bool m_reload_delayed;
 
-    GCodePreviewVolumeIndex m_gcode_preview_volume_index;
+#if ENABLE_RENDER_PICKING_PASS
+    bool m_show_picking_texture;
+#endif // ENABLE_RENDER_PICKING_PASS
 
-#if !ENABLE_IMGUI
-    wxWindow *m_external_gizmo_widgets_parent;
-#endif // not ENABLE_IMGUI
+    KeyAutoRepeatFilter m_shift_kar_filter;
+    KeyAutoRepeatFilter m_ctrl_kar_filter;
 
-#if !ENABLE_CONSTRAINED_CAMERA_TARGET
-    void viewport_changed();
-#endif // !ENABLE_CONSTRAINED_CAMERA_TARGET
+    RenderStats m_render_stats;
+
+    int m_imgui_undo_redo_hovered_pos{ -1 };
+    int m_mouse_wheel{ 0 };
+    int m_selected_extruder;
+
+    Labels m_labels;
+    Tooltip m_tooltip;
+    bool m_tooltip_enabled{ true };
+    Slope m_slope;
+
+    class SLAView
+    {
+    public:
+        explicit SLAView(GLCanvas3D& parent) : m_parent(parent) {}
+        void detect_type_from_volumes(const GLVolumeUPtrs& volumes);
+        void set_type(ESLAViewType type);
+        void set_type(const GLVolume::CompositeID& id, ESLAViewType type);
+        void update_volumes_visibility(GLVolumeUPtrs& volumes);
+        void update_instances_cache(const std::vector<std::pair<GLVolume::CompositeID, GLVolume::CompositeID>>& new_to_old_ids_map);
+        void render_switch_button();
+
+#if ENABLE_SLA_VIEW_DEBUG_WINDOW
+        void render_debug_window();
+#endif // ENABLE_SLA_VIEW_DEBUG_WINDOW
+
+    private:
+        GLCanvas3D& m_parent;
+        typedef std::pair<GLVolume::CompositeID, ESLAViewType> InstancesCacheItem;
+        std::vector<InstancesCacheItem> m_instances_cache;
+        bool m_use_instance_bbox{ true };
+
+        InstancesCacheItem* find_instance_item(const GLVolume::CompositeID& id);
+        void select_full_instance(const GLVolume::CompositeID& id);
+    };
+
+    SLAView m_sla_view;
+    bool m_sla_view_type_detection_active{ false };
+
+    bool is_arrange_alignment_enabled() const;
+
+    ArrangeSettingsDb_AppCfg   m_arrange_settings_db;
+    ArrangeSettingsDialogImgui m_arrange_settings_dialog;
 
 public:
-    GLCanvas3D(wxGLCanvas* canvas);
+
+    struct ContoursList
+    {
+        // list of unique contours
+        Polygons contours;
+        // if defined: list of transforms to apply to contours
+        std::optional<std::vector<std::pair<size_t, Transform3d>>> trafos;
+
+        bool empty() const { return contours.empty(); }
+    };
+
+private:
+
+    class SequentialPrintClearance
+    {
+        GLModel m_fill;
+        // list of unique contours
+        std::vector<GLModel> m_contours;
+        // list of transforms used to render the contours
+        std::vector<std::pair<size_t, Transform3d>> m_instances;
+        bool m_evaluating{ false };
+        bool m_dragging{ false };
+
+        std::vector<std::pair<Pointf3s, Transform3d>> m_hulls_2d_cache;
+
+    public:
+        void set_contours(const ContoursList& contours, bool generate_fill);
+        void update_instances_trafos(const std::vector<Transform3d>& trafos);
+        void render();
+        bool empty() const { return m_contours.empty(); }
+
+        void start_dragging() { m_dragging = true; }
+        bool is_dragging() const { return m_dragging; }
+        void stop_dragging() { m_dragging = false; }
+
+        friend class GLCanvas3D;
+    };
+
+    SequentialPrintClearance m_sequential_print_clearance;
+    bool m_sequential_print_clearance_first_displacement{ true };
+
+    struct ToolbarHighlighter
+    {
+        void set_timer_owner(wxEvtHandler* owner, int timerid = wxID_ANY);
+        void init(GLToolbarItem* toolbar_item, GLCanvas3D* canvas);
+        void blink();
+        void invalidate();
+        bool                    m_render_arrow{ false };
+        GLToolbarItem*          m_toolbar_item{ nullptr };
+    private:
+        GLCanvas3D*             m_canvas{ nullptr };
+        int				        m_blink_counter{ 0 };
+        ToolbarHighlighterTimer m_timer;       
+    }
+    m_toolbar_highlighter;
+
+    struct GizmoHighlighter
+    {
+        void set_timer_owner(wxEvtHandler* owner, int timerid = wxID_ANY);
+        void init(GLGizmosManager* manager, GLGizmosManager::EType gizmo, GLCanvas3D* canvas);
+        void blink();
+        void invalidate();
+        bool                    m_render_arrow{ false };
+        GLGizmosManager::EType  m_gizmo_type;
+    private:
+        GLGizmosManager*        m_gizmo_manager{ nullptr };
+        GLCanvas3D*             m_canvas{ nullptr };
+        int				        m_blink_counter{ 0 };
+        GizmoHighlighterTimer   m_timer;
+
+    }
+    m_gizmo_highlighter;
+
+#if ENABLE_SHOW_CAMERA_TARGET
+    struct CameraTarget
+    {
+        std::array<GLModel, 3> axis;
+        Vec3d target{ Vec3d::Zero() };
+    };
+
+    CameraTarget m_camera_target;
+#endif // ENABLE_SHOW_CAMERA_TARGET
+    GLModel m_background;
+
+public:
+    GLCanvas3D(wxGLCanvas* canvas, Bed3D& bed);
     ~GLCanvas3D();
 
-#if ENABLE_USE_UNIQUE_GLCONTEXT
+    bool is_initialized() const { return m_initialized; }
+
     void set_context(wxGLContext* context) { m_context = context; }
-#endif // ENABLE_USE_UNIQUE_GLCONTEXT
 
     wxGLCanvas* get_wxglcanvas() { return m_canvas; }
+	const wxGLCanvas* get_wxglcanvas() const { return m_canvas; }
 
-#if ENABLE_REMOVE_TABS_FROM_PLATER
-#if ENABLE_TOOLBAR_BACKGROUND_TEXTURE
-    void set_view_toolbar(GLToolbar* toolbar) { m_view_toolbar = toolbar; }
-#else
-    void set_view_toolbar(GLRadioToolbar* toolbar) { m_view_toolbar = toolbar; }
-#endif // ENABLE_TOOLBAR_BACKGROUND_TEXTURE
-#endif // ENABLE_REMOVE_TABS_FROM_PLATER
-
-    bool init(bool useVBOs, bool use_legacy_opengl);
+    bool init();
     void post_event(wxEvent &&event);
 
-#if !ENABLE_USE_UNIQUE_GLCONTEXT
-    bool set_current();
-#endif // !ENABLE_USE_UNIQUE_GLCONTEXT
+    std::shared_ptr<SceneRaycasterItem> add_raycaster_for_picking(SceneRaycaster::EType type, int id, const MeshRaycaster& raycaster,
+        const Transform3d& trafo = Transform3d::Identity(), bool use_back_faces = false) {
+        return m_scene_raycaster.add_raycaster(type, id, raycaster, trafo, use_back_faces);
+    }
+    void remove_raycasters_for_picking(SceneRaycaster::EType type, int id) {
+        m_scene_raycaster.remove_raycasters(type, id);
+    }
+    void remove_raycasters_for_picking(SceneRaycaster::EType type) {
+        m_scene_raycaster.remove_raycasters(type);
+    }
+
+    std::vector<std::shared_ptr<SceneRaycasterItem>>* get_raycasters_for_picking(SceneRaycaster::EType type) {
+        return m_scene_raycaster.get_raycasters(type);
+    }
+
+    void set_raycaster_gizmos_on_top(bool value) {
+        m_scene_raycaster.set_gizmos_on_top(value);
+    }
 
     void set_as_dirty();
+    bool is_preview_dirty();
+    bool is_gcode_preview_dirty(const GCodeProcessorResult& gcode_result);
+    void set_items_show(bool show_objects, bool show_gcode);
+
+    void requires_check_outside_state() { m_requires_check_outside_state = true; }
 
     unsigned int get_volumes_count() const;
-    void reset_volumes();
-#if ENABLE_REMOVE_TABS_FROM_PLATER
-    int check_volumes_outside_state() const;
-#else
-    int check_volumes_outside_state(const DynamicPrintConfig* config) const;
-#endif // ENABLE_REMOVE_TABS_FROM_PLATER
+    const GLVolumeCollection& get_volumes() const { return m_volumes; }
+    void reset_volumes(bool is_destroying = false);
+    ModelInstanceEPrintVolumeState check_volumes_outside_state(bool selection_only = true) const;
+    // update the is_outside state of all the volumes contained in the given collection
+    void check_volumes_outside_state(GLVolumeCollection& volumes) const;
 
-    void set_config(DynamicPrintConfig* config);
+private:
+    // returns true if all the volumes are completely contained in the print volume
+    // returns the containment state in the given out_state, if non-null
+    bool check_volumes_outside_state(GLVolumeCollection& volumes, ModelInstanceEPrintVolumeState* out_state, bool selection_only = true) const;
+
+public:
+    void init_gcode_viewer() { m_gcode_viewer.init(); }
+    void reset_gcode_toolpaths() { m_gcode_viewer.reset(); }
+    const GCodeViewer::SequentialView& get_gcode_sequential_view() const { return m_gcode_viewer.get_sequential_view(); }
+    void update_gcode_sequential_view_current(unsigned int first, unsigned int last) { m_gcode_viewer.update_sequential_view_current(first, last); }
+
+    void toggle_sla_auxiliaries_visibility(bool visible, const ModelObject* mo = nullptr, int instance_idx = -1);
+    void toggle_model_objects_visibility(bool visible, const ModelObject* mo = nullptr, int instance_idx = -1, const ModelVolume* mv = nullptr);
+    void update_instance_printable_state_for_object(size_t obj_idx);
+    void update_instance_printable_state_for_objects(const std::vector<size_t>& object_idxs);
+
+    void set_config(const DynamicPrintConfig* config);
+    const DynamicPrintConfig *config() const { return m_config; }
     void set_process(BackgroundSlicingProcess* process);
     void set_model(Model* model);
+    const Model* get_model() const { return m_model; }
+
+    const arr2::ArrangeSettingsView * get_arrange_settings_view() const { return &m_arrange_settings_dialog; }
+    void set_arrange_settings(const DynamicPrintConfig& conf, PrinterTechnology tech) { m_arrange_settings_dialog.set_arrange_settings(conf, tech); }
 
     const Selection& get_selection() const { return m_selection; }
     Selection& get_selection() { return m_selection; }
 
-    // Set the bed shape to a single closed 2D polygon(array of two element arrays),
-    // triangulate the bed and store the triangles into m_bed.m_triangles,
-    // fills the m_bed.m_grid_lines and sets m_bed.m_origin.
-    // Sets m_bed.m_polygon to limit the object placement.
-    void set_bed_shape(const Pointfs& shape);
-    void set_bed_axes_length(double length);
+    const GLGizmosManager& get_gizmos_manager() const { return m_gizmos; }
+    GLGizmosManager& get_gizmos_manager() { return m_gizmos; }
 
-    void set_clipping_plane(unsigned int id, const ClippingPlane& plane)
-    {
-        if (id < 2)
-        {
+    void bed_shape_changed();
+
+    void set_clipping_plane(unsigned int id, const ClippingPlane& plane) {
+        if (id < 2) {
             m_clipping_planes[id] = plane;
             m_sla_caps[id].reset();
         }
     }
+    void reset_clipping_planes_cache() { m_sla_caps[0].triangles.clear(); m_sla_caps[1].triangles.clear(); }
     void set_use_clipping_planes(bool use) { m_use_clipping_planes = use; }
 
-    void set_color_by(const std::string& value);
+    bool                                get_use_clipping_planes() const { return m_use_clipping_planes; }
+    const std::array<ClippingPlane, 2> &get_clipping_planes() const { return m_clipping_planes; };
 
-    float get_camera_zoom() const;
+    void set_use_color_clip_plane(bool use) { m_volumes.set_use_color_clip_plane(use); }
+    void set_color_clip_plane(const Vec3d& cp_normal, double offset) { m_volumes.set_color_clip_plane(cp_normal, offset); }
+    void set_color_clip_plane_colors(const std::array<ColorRGBA, 2>& colors) { m_volumes.set_color_clip_plane_colors(colors); }
+
+    void refresh_camera_scene_box();
 
     BoundingBoxf3 volumes_bounding_box() const;
-#if ENABLE_CONSTRAINED_CAMERA_TARGET
     BoundingBoxf3 scene_bounding_box() const;
-#endif // ENABLE_CONSTRAINED_CAMERA_TARGET
 
     bool is_layers_editing_enabled() const;
     bool is_layers_editing_allowed() const;
+    bool is_search_pressed() const;
+
+    void reset_layer_height_profile();
+    void adaptive_layer_height_profile(const HeightProfileAdaptiveParams& adaptive_params);
+    void smooth_layer_height_profile(const HeightProfileSmoothingParams& smoothing_params);
 
     bool is_reload_delayed() const;
 
     void enable_layers_editing(bool enable);
-    void enable_warning_texture(bool enable);
     void enable_legend_texture(bool enable);
     void enable_picking(bool enable);
     void enable_moving(bool enable);
     void enable_gizmos(bool enable);
-    void enable_toolbar(bool enable);
-    void enable_shader(bool enable);
-    void enable_force_zoom_to_bed(bool enable);
+    void enable_selection(bool enable);
+    void enable_main_toolbar(bool enable);
+    void enable_undoredo_toolbar(bool enable);
     void enable_dynamic_background(bool enable);
+    void enable_labels(bool enable) { m_labels.enable(enable); }
+    void enable_slope(bool enable) { m_slope.enable(enable); }
     void allow_multisample(bool allow);
-
-    void enable_toolbar_item(const std::string& name, bool enable);
-    bool is_toolbar_item_pressed(const std::string& name) const;
 
     void zoom_to_bed();
     void zoom_to_volumes();
-#if ENABLE_MODIFIED_CAMERA_TARGET
     void zoom_to_selection();
-#endif // ENABLE_MODIFIED_CAMERA_TARGET
+    void zoom_to_gcode();
     void select_view(const std::string& direction);
-    void set_viewport_from_scene(const GLCanvas3D& other);
+
+    PrinterTechnology current_printer_technology() const;
 
     void update_volumes_colors_by_extruder();
 
-#if !ENABLE_IMGUI
-    Rect get_gizmo_reset_rect(const GLCanvas3D& canvas, bool viewport) const;
-    bool gizmo_reset_rect_contains(const GLCanvas3D& canvas, float x, float y) const;
-#endif // not ENABLE_IMGUI
-
-    bool is_dragging() const { return m_gizmos.is_dragging() || m_moving; }
+    bool is_dragging() const { return m_gizmos.is_dragging() || (m_moving && !m_mouse.scene_position.isApprox(m_mouse.drag.start_position_3D)); }
 
     void render();
+    // printable_only == false -> render also non printable volumes as grayed
+    // parts_only == false -> render also sla support and pad
+    void render_thumbnail(ThumbnailData& thumbnail_data, unsigned int w, unsigned int h, const ThumbnailsParams& thumbnail_params, Camera::EType camera_type);
+    void render_thumbnail(ThumbnailData& thumbnail_data, unsigned int w, unsigned int h, const ThumbnailsParams& thumbnail_params, const GLVolumeCollection& volumes, Camera::EType camera_type);
 
     void select_all();
+    void deselect_all();
     void delete_selected();
-    void ensure_on_bed(unsigned int object_idx);
+    void ensure_on_bed(unsigned int object_idx, bool allow_negative_z);
 
-    std::vector<double> get_current_print_zs(bool active_only) const;
-    void set_toolpaths_range(double low, double high);
+    bool is_gcode_legend_enabled() const { return m_gcode_viewer.is_legend_enabled(); }
+    GCodeViewer::EViewType get_gcode_view_type() const { return m_gcode_viewer.get_view_type(); }
+    const std::vector<double>& get_gcode_layers_zs() const;
+    std::vector<double> get_volumes_print_zs(bool active_only) const;
+    unsigned int get_gcode_options_visibility_flags() const { return m_gcode_viewer.get_options_visibility_flags(); }
+    void set_gcode_options_visibility_from_flags(unsigned int flags);
+    unsigned int get_toolpath_role_visibility_flags() const { return m_gcode_viewer.get_toolpath_role_visibility_flags(); }
+    void set_toolpath_role_visibility_flags(unsigned int flags);
+    void set_toolpath_view_type(GCodeViewer::EViewType type);
+    void set_volumes_z_range(const std::array<double, 2>& range);
+    void set_toolpaths_z_range(const std::array<unsigned int, 2>& range);
+    std::vector<CustomGCode::Item>& get_custom_gcode_per_print_z() { return m_gcode_viewer.get_custom_gcode_per_print_z(); }
+    size_t get_gcode_extruders_count() { return m_gcode_viewer.get_extruders_count(); }
 
     std::vector<int> load_object(const ModelObject& model_object, int obj_idx, std::vector<int> instance_idxs);
     std::vector<int> load_object(const Model& model, int obj_idx);
@@ -954,94 +859,245 @@ public:
 
     void reload_scene(bool refresh_immediately, bool force_full_scene_refresh = false);
 
-    void load_gcode_preview(const GCodePreviewData& preview_data, const std::vector<std::string>& str_tool_colors);
+    void load_gcode_shells();
+    void load_gcode_preview(const GCodeProcessorResult& gcode_result, const std::vector<std::string>& str_tool_colors);
+    void refresh_gcode_preview_render_paths(bool keep_sequential_current_first, bool keep_sequential_current_last);
+    void set_gcode_view_preview_type(GCodeViewer::EViewType type) { return m_gcode_viewer.set_view_type(type); }
+    GCodeViewer::EViewType get_gcode_view_preview_type() const { return m_gcode_viewer.get_view_type(); }
     void load_sla_preview();
-    void load_preview(const std::vector<std::string>& str_tool_colors);
-
+    void load_preview(const std::vector<std::string>& str_tool_colors, const std::vector<CustomGCode::Item>& color_print_values);
     void bind_event_handlers();
     void unbind_event_handlers();
 
     void on_size(wxSizeEvent& evt);
     void on_idle(wxIdleEvent& evt);
     void on_char(wxKeyEvent& evt);
+    void on_key(wxKeyEvent& evt);
     void on_mouse_wheel(wxMouseEvent& evt);
     void on_timer(wxTimerEvent& evt);
+    void on_render_timer(wxTimerEvent& evt);
     void on_mouse(wxMouseEvent& evt);
     void on_paint(wxPaintEvent& evt);
-    void on_key_down(wxKeyEvent& evt);
+    void on_set_focus(wxFocusEvent& evt);
 
     Size get_canvas_size() const;
-    Point get_local_mouse_position() const;
+    Vec2d get_local_mouse_position() const;
 
-    void reset_legend_texture();
+    // store opening position of menu
+    std::optional<Vec2d> m_popup_menu_positon; // position of mouse right click
+    void  set_popup_menu_position(const Vec2d &position) { m_popup_menu_positon = position; }
+    const std::optional<Vec2d>& get_popup_menu_position() const { return m_popup_menu_positon; }
+    void clear_popup_menu_position() { m_popup_menu_positon.reset(); }
 
-    void set_tooltip(const std::string& tooltip) const;
+    void set_tooltip(const std::string& tooltip);
 
-#if !ENABLE_IMGUI
-    void set_external_gizmo_widgets_parent(wxWindow *parent);
-#endif // not ENABLE_IMGUI
-
-    void do_move();
-    void do_rotate();
-    void do_scale();
-    void do_flatten();
-    void do_mirror();
-
-    void set_camera_zoom(float zoom);
+    // the following methods add a snapshot to the undo/redo stack, unless the given string is empty
+    void do_move(const std::string& snapshot_type);
+    void do_rotate(const std::string& snapshot_type);
+    void do_scale(const std::string& snapshot_type);
+    void do_mirror(const std::string& snapshot_type);
+    void do_reset_skew(const std::string& snapshot_type);
 
     void update_gizmos_on_off_state();
+    void reset_all_gizmos() { m_gizmos.reset_all_states(); }
 
-#if ENABLE_CONSTRAINED_CAMERA_TARGET
-    void viewport_changed();
-#endif // ENABLE_CONSTRAINED_CAMERA_TARGET
+    void handle_sidebar_focus_event(const std::string& opt_key, bool focus_on);
+    void handle_layers_data_focus_event(const t_layer_height_range range, const EditorType type);
 
-    void handle_sidebar_focus_event(const std::string& opt_key) {}
+    void update_ui_from_settings();
+
+    int get_move_volume_id() const { return m_mouse.drag.move_volume_idx; }
+    int get_first_hover_volume_idx() const { return m_hover_volume_idxs.empty() ? -1 : m_hover_volume_idxs.front(); }
+    void set_selected_extruder(int extruder) { m_selected_extruder = extruder;}
+    
+    class WipeTowerInfo {
+    protected:
+        Vec2d m_pos = {NaNd, NaNd};
+        double m_rotation = 0.;
+        BoundingBoxf m_bb;
+        friend class GLCanvas3D;
+
+    public:        
+        inline operator bool() const {
+            return !std::isnan(m_pos.x()) && !std::isnan(m_pos.y());
+        }
+        
+        inline const Vec2d& pos() const { return m_pos; }
+        inline double rotation() const { return m_rotation; }
+        inline const Vec2d bb_size() const { return m_bb.size(); }
+        inline const BoundingBoxf& bounding_box() const { return m_bb; }
+        
+        void apply_wipe_tower() const;
+
+        static void apply_wipe_tower(Vec2d pos, double rot);
+    };
+    
+    WipeTowerInfo get_wipe_tower_info() const;
+
+    // Returns the view ray line, in world coordinate, at the given mouse position.
+    Linef3 mouse_ray(const Point& mouse_pos);
+
+    bool is_mouse_dragging() const { return m_mouse.dragging; }
+
+    double get_size_proportional_to_max_bed_size(double factor) const;
+
+    void set_cursor(ECursorType type);
+    void msw_rescale();
+
+    void request_extra_frame() { m_extra_frame_requested = true; }
+    
+    void schedule_extra_frame(int miliseconds);
+
+    float get_main_toolbar_height() { return m_main_toolbar.get_height(); }
+    int get_main_toolbar_item_id(const std::string& name) const { return m_main_toolbar.get_item_id(name); }
+    void force_main_toolbar_left_action(int item_id) { m_main_toolbar.force_left_action(item_id, *this); }
+    void force_main_toolbar_right_action(int item_id) { m_main_toolbar.force_right_action(item_id, *this); }
+    void update_tooltip_for_settings_item_in_main_toolbar();
+
+    bool has_toolpaths_to_export() const;
+    void export_toolpaths_to_obj(const char* filename) const;
+
+    void mouse_up_cleanup();
+
+    bool are_labels_shown() const { return m_labels.is_shown(); }
+    void show_labels(bool show) { m_labels.show(show); }
+
+    bool is_legend_shown() const { return m_gcode_viewer.is_legend_enabled(); }
+    void show_legend(bool show) { m_gcode_viewer.enable_legend(show); m_dirty = true; }
+
+    bool is_using_slope() const { return m_slope.is_used(); }
+    void use_slope(bool use) { m_slope.use(use); }
+    void set_slope_normal_angle(float angle_in_deg) { m_slope.set_normal_angle(angle_in_deg); }
+
+    void show_print_warning(bool visible/*std::string str*/) {
+        _set_warning_notification(EWarning::PrintWarning, visible);
+        //if (str.empty())
+        //    _set_warning_notification(EWarning::PrintWarning, false);
+        //else
+        //    _set_warning_notification(EWarning::PrintWarning, true, str);
+    }
+
+    void highlight_toolbar_item(const std::string& item_name);
+    void highlight_gizmo(const std::string& gizmo_name);
+
+    // Timestamp for FPS calculation and notification fade-outs.
+    static int64_t timestamp_now() {
+#ifdef _WIN32
+        // Cheaper on Windows, calls GetSystemTimeAsFileTime()
+        return wxGetUTCTimeMillis().GetValue();
+#else
+        // calls clock()
+        return wxGetLocalTimeMillis().GetValue();
+#endif
+    }
+
+    void reset_sequential_print_clearance() {
+        m_sequential_print_clearance.m_evaluating = false;
+        if (m_sequential_print_clearance.is_dragging())
+            m_sequential_print_clearance_first_displacement = true;
+        else
+            m_sequential_print_clearance.set_contours(ContoursList(), false);
+        set_as_dirty();
+        request_extra_frame();
+    }
+
+    void set_sequential_print_clearance_contours(const ContoursList& contours, bool generate_fill) {
+        m_sequential_print_clearance.set_contours(contours, generate_fill);
+        set_as_dirty();
+        request_extra_frame();
+    }
+
+    bool is_sequential_print_clearance_empty() const {
+        return m_sequential_print_clearance.empty();
+    }
+
+    bool is_sequential_print_clearance_evaluating() const {
+        return m_sequential_print_clearance.m_evaluating;
+    }
+
+    void update_sequential_clearance(bool force_contours_generation);
+    void set_sequential_clearance_as_evaluating() {
+        m_sequential_print_clearance.m_evaluating = true;
+        set_as_dirty();
+        request_extra_frame();
+    }
+
+    const Print* fff_print() const;
+    const SLAPrint* sla_print() const;
+
+    void reset_old_size() { m_old_size = { 0, 0 }; }
+
+    bool is_object_sinking(int object_idx) const;
+
+    void apply_retina_scale(Vec2d &screen_coordinate) const;
+
+    std::pair<SlicingParameters, const std::vector<double>> get_layers_height_data(int object_id);
+
+    void detect_sla_view_type();
+    void set_sla_view_type(ESLAViewType type);
+    void set_sla_view_type(const GLVolume::CompositeID& id, ESLAViewType type);
+    void enable_sla_view_type_detection() { m_sla_view_type_detection_active = true; }
 
 private:
     bool _is_shown_on_screen() const;
-    void _force_zoom_to_bed();
 
-    bool _init_toolbar();
+    bool _init_toolbars();
+    bool _init_main_toolbar();
+    bool _init_undoredo_toolbar();
+    bool _init_view_toolbar();
+    bool _init_collapse_toolbar();
 
-#if ENABLE_USE_UNIQUE_GLCONTEXT
     bool _set_current();
-#endif // ENABLE_USE_UNIQUE_GLCONTEXT
     void _resize(unsigned int w, unsigned int h);
 
-    BoundingBoxf3 _max_bounding_box() const;
+    BoundingBoxf3 _max_bounding_box(bool include_gizmos, bool include_bed_model) const;
 
-    void _zoom_to_bounding_box(const BoundingBoxf3& bbox);
-    float _get_zoom_to_bounding_box_factor(const BoundingBoxf3& bbox) const;
+    void _zoom_to_box(const BoundingBoxf3& box, double margin_factor = DefaultCameraZoomToBoxMarginFactor);
+    void _update_camera_zoom(double zoom);
 
-    void _mark_volumes_for_layer_height() const;
     void _refresh_if_shown_on_screen();
 
-    void _camera_tranform() const;
-    void _picking_pass() const;
-    void _render_background() const;
-    void _render_bed(float theta) const;
-    void _render_axes() const;
-    void _render_objects() const;
-    void _render_selection() const;
-    void _render_warning_texture() const;
-    void _render_legend_texture() const;
-    void _render_layer_editing_overlay() const;
-    void _render_volumes(bool fake_colors) const;
+    void _picking_pass();
+    void _rectangular_selection_picking_pass();
+    void _render_background();
+    void _render_bed(const Transform3d& view_matrix, const Transform3d& projection_matrix, bool bottom);
+    void _render_bed_axes();
+    void _render_bed_for_picking(const Transform3d& view_matrix, const Transform3d& projection_matrix, bool bottom);
+    void _render_objects(GLVolumeCollection::ERenderType type);
+    void _render_gcode();
+    void _render_gcode_cog();
+    void _render_selection();
+    void _render_sequential_clearance();
+#if ENABLE_RENDER_SELECTION_CENTER
+    void _render_selection_center();
+#endif // ENABLE_RENDER_SELECTION_CENTER
+    void _check_and_update_toolbar_icon_scale();
+    void _render_overlays();
+    void _render_volumes_for_picking(const Camera& camera) const;
     void _render_current_gizmo() const;
-    void _render_gizmos_overlay() const;
-    void _render_toolbar() const;
-#if ENABLE_REMOVE_TABS_FROM_PLATER
+    void _render_gizmos_overlay();
+    void _render_main_toolbar();
+    void _render_undoredo_toolbar();
+    void _render_collapse_toolbar() const;
     void _render_view_toolbar() const;
-#endif // ENABLE_REMOVE_TABS_FROM_PLATER
 #if ENABLE_SHOW_CAMERA_TARGET
-    void _render_camera_target() const;
+    void _render_camera_target();
 #endif // ENABLE_SHOW_CAMERA_TARGET
-    void _render_sla_slices() const;
+    void _render_sla_slices();
+    void _render_selection_sidebar_hints();
+    bool _render_undo_redo_stack(const bool is_undo, float pos_x);
+    bool _render_search_list(float pos_x);
+    bool _render_arrange_menu(float pos_x);
+    void _render_thumbnail_internal(ThumbnailData& thumbnail_data, const ThumbnailsParams& thumbnail_params, const GLVolumeCollection& volumes, Camera::EType camera_type);
+    // render thumbnail using an off-screen framebuffer
+    void _render_thumbnail_framebuffer(ThumbnailData& thumbnail_data, unsigned int w, unsigned int h, const ThumbnailsParams& thumbnail_params, const GLVolumeCollection& volumes, Camera::EType camera_type);
+    // render thumbnail using an off-screen framebuffer when GLEW_EXT_framebuffer_object is supported
+    void _render_thumbnail_framebuffer_ext(ThumbnailData& thumbnail_data, unsigned int w, unsigned int h, const ThumbnailsParams& thumbnail_params, const GLVolumeCollection& volumes, Camera::EType camera_type);
+    // render thumbnail using the default framebuffer
+    void _render_thumbnail_legacy(ThumbnailData& thumbnail_data, unsigned int w, unsigned int h, const ThumbnailsParams& thumbnail_params, const GLVolumeCollection& volumes, Camera::EType camera_type);
 
-    void _update_volumes_hover_state() const;
-    void _update_gizmos_data();
+    void _update_volumes_hover_state();
 
-    float _get_layers_editing_cursor_z_relative() const;
     void _perform_layer_editing_action(wxMouseEvent* evt = nullptr);
 
     // Convert the screen space coordinate to an object space coordinate.
@@ -1051,62 +1107,60 @@ private:
     // Convert the screen space coordinate to world coordinate on the bed.
     Vec3d _mouse_to_bed_3d(const Point& mouse_pos);
 
-    // Returns the view ray line, in world coordinate, at the given mouse position.
-    Linef3 mouse_ray(const Point& mouse_pos);
-
     void _start_timer();
     void _stop_timer();
 
     // Create 3D thick extrusion lines for a skirt and brim.
-    // Adds a new Slic3r::GUI::3DScene::Volume to volumes.
-    void _load_print_toolpaths();
+    // Adds a new Slic3r::GUI::3DScene::Volume to volumes, updates collision with the build_volume.
+    void _load_skirt_brim_preview_toolpaths(const BuildVolume &build_volume);
     // Create 3D thick extrusion lines for object forming extrusions.
     // Adds a new Slic3r::GUI::3DScene::Volume to $self->volumes,
-    // one for perimeters, one for infill and one for supports.
-    void _load_print_object_toolpaths(const PrintObject& print_object, const std::vector<std::string>& str_tool_colors);
-    // Create 3D thick extrusion lines for wipe tower extrusions
-    void _load_wipe_tower_toolpaths(const std::vector<std::string>& str_tool_colors);
+    // one for perimeters, one for infill and one for supports, updates collision with the build_volume.
+    void _load_print_object_toolpaths(const PrintObject& print_object, const BuildVolume &build_volume,
+        const std::vector<std::string>& str_tool_colors, const std::vector<CustomGCode::Item>& color_print_values);
+    // Create 3D thick extrusion lines for wipe tower extrusions, updates collision with the build_volume.
+    void _load_wipe_tower_toolpaths(const BuildVolume &build_volume, const std::vector<std::string>& str_tool_colors);
 
-    // generates gcode extrusion paths geometry
-    void _load_gcode_extrusion_paths(const GCodePreviewData& preview_data, const std::vector<float>& tool_colors);
-    // generates gcode travel paths geometry
-    void _load_gcode_travel_paths(const GCodePreviewData& preview_data, const std::vector<float>& tool_colors);
-    bool _travel_paths_by_type(const GCodePreviewData& preview_data);
-    bool _travel_paths_by_feedrate(const GCodePreviewData& preview_data);
-    bool _travel_paths_by_tool(const GCodePreviewData& preview_data, const std::vector<float>& tool_colors);
-    // generates gcode retractions geometry
-    void _load_gcode_retractions(const GCodePreviewData& preview_data);
-    // generates gcode unretractions geometry
-    void _load_gcode_unretractions(const GCodePreviewData& preview_data);
-    // generates objects and wipe tower geometry
-    void _load_shells_fff();
-    // generates objects geometry for sla
-    void _load_shells_sla();
-    // sets gcode geometry visibility according to user selection
-    void _update_gcode_volumes_visibility(const GCodePreviewData& preview_data);
-    void _update_toolpath_volumes_outside_state();
-    void _show_warning_texture_if_needed();
+    // Load SLA objects and support structures for objects, for which the slaposSliceSupports step has been finished.
+	void _load_sla_shells();
+    void _update_sla_shells_outside_state();
+    void _set_warning_notification_if_needed(EWarning warning);
 
-    // generates the legend texture in dependence of the current shown view type
-    void _generate_legend_texture(const GCodePreviewData& preview_data, const std::vector<float>& tool_colors);
+    // generates a warning notification containing the given message
+    void _set_warning_notification(EWarning warning, bool state);
 
-    // generates a warning texture containing the given message
-    void _generate_warning_texture(const std::string& msg);
-    void _reset_warning_texture();
+    std::pair<bool, const GLVolume*> _is_any_volume_outside() const;
 
-    bool _is_any_volume_outside() const;
+    // updates the selection from the content of m_hover_volume_idxs
+    void _update_selection_from_hover();
 
-#if ENABLE_REMOVE_TABS_FROM_PLATER
-    void _resize_toolbars() const;
-#else
-    void _resize_toolbar() const;
-#endif // ENABLE_REMOVE_TABS_FROM_PLATER
+    bool _deactivate_undo_redo_toolbar_items();
+    bool _deactivate_search_toolbar_item();
+    bool _activate_search_toolbar_item();
+    bool _deactivate_collapse_toolbar_items();
+    bool _deactivate_arrange_menu();
 
-    static std::vector<float> _parse_colors(const std::vector<std::string>& colors);
+    float get_overlay_window_width() { return LayersEditing::get_overlay_window_width(); }
 
-    const Print* fff_print() const;
-    const SLAPrint* sla_print() const;
+#if ENABLE_BINARIZED_GCODE_DEBUG_WINDOW
+    void show_binary_gcode_debug_window();
+#endif // ENABLE_BINARIZED_GCODE_DEBUG_WINDOW
 };
+
+const ModelVolume *get_model_volume(const GLVolume &v, const Model &model);
+ModelVolume *get_model_volume(const ObjectID &volume_id, const ModelObjectPtrs &objects);
+ModelVolume *get_model_volume(const GLVolume &v, const ModelObjectPtrs &objects);
+ModelVolume *get_model_volume(const GLVolume &v, const ModelObject &object);
+
+GLVolume *get_first_hovered_gl_volume(const GLCanvas3D &canvas);
+GLVolume *get_selected_gl_volume(const GLCanvas3D &canvas);
+
+ModelObject *get_model_object(const GLVolume &gl_volume, const Model &model);
+ModelObject *get_model_object(const GLVolume &gl_volume, const ModelObjectPtrs &objects);
+
+ModelInstance *get_model_instance(const GLVolume &gl_volume, const Model &model);
+ModelInstance *get_model_instance(const GLVolume &gl_volume, const ModelObjectPtrs &objects);
+ModelInstance *get_model_instance(const GLVolume &gl_volume, const ModelObject &object);
 
 } // namespace GUI
 } // namespace Slic3r

@@ -1,5 +1,5 @@
+cmake_minimum_required(VERSION 2.8.12)
 project(nowide)
-cmake_minimum_required(VERSION 2.6)
 
 add_library(nowide STATIC
     nowide/args.hpp
@@ -18,3 +18,7 @@ add_library(nowide STATIC
     nowide/utf8_codecvt.hpp
     nowide/windows.hpp
 )
+
+target_link_libraries(nowide PUBLIC boost_headeronly)
+
+

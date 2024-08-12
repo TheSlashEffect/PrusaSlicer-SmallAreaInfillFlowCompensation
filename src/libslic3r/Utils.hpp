@@ -1,3 +1,8 @@
+///|/ Copyright (c) Prusa Research 2016 - 2023 Oleksandra Iushchenko @YuSanka, Vojtěch Bubník @bubnikv, Filip Sykala @Jony01, David Kocík @kocikdav, Enrico Turri @enricoturri1966, Tomáš Mészáros @tamasmeszaros, Lukáš Matěna @lukasmatena, Vojtěch Král @vojtechkral
+///|/ Copyright (c) 2019 Sijmen Schoon
+///|/
+///|/ PrusaSlicer is released under the terms of the AGPLv3 or higher
+///|/
 #ifndef slic3r_Utils_hpp_
 #define slic3r_Utils_hpp_
 
@@ -5,14 +10,31 @@
 #include <utility>
 #include <functional>
 #include <type_traits>
+#include <system_error>
+#include <cmath>
+
+#include <boost/filesystem.hpp>
+#include <boost/system/error_code.hpp>
+#include <boost/filesystem/path.hpp>
 
 #include "libslic3r.h"
 
+namespace boost { namespace filesystem { class directory_entry; }}
+
 namespace Slic3r {
 
+inline std::optional<std::size_t> thread_count;
 extern void set_logging_level(unsigned int level);
-extern void trace(unsigned int level, const char *message);
-extern void disable_multi_threading();
+extern unsigned get_logging_level();
+// Format memory allocated, separate thousands by comma.
+extern std::string format_memsize_MB(size_t n);
+// Return string to be added to the boost::log output to inform about the current process memory allocation.
+// The string is non-empty if the loglevel >= info (3) or ignore_loglevel==true.
+// Latter is used to get the memory info from SysInfoDialog.
+extern std::string log_memory_info(bool ignore_loglevel = false);
+extern void enforce_thread_count(std::size_t count);
+// Returns the size of physical memory (RAM) in bytes.
+extern size_t total_physical_memory();
 
 // Set a path with GUI resource files.
 void set_var_dir(const std::string &path);
@@ -31,10 +53,28 @@ void set_local_dir(const std::string &path);
 // Return a full path to the localization directory.
 const std::string& localization_dir();
 
+// Set a path with shapes gallery files.
+void set_sys_shapes_dir(const std::string &path);
+// Return a full path to the system shapes gallery directory.
+const std::string& sys_shapes_dir();
+
+// Return a full path to the custom shapes gallery directory.
+std::string custom_shapes_dir();
+
+// Set a path with shapes gallery files.
+void set_custom_gcodes_dir(const std::string &path);
+// Return a full path to the system shapes gallery directory.
+const std::string& custom_gcodes_dir();
+
 // Set a path with preset files.
 void set_data_dir(const std::string &path);
 // Return a full path to the GUI resource files.
 const std::string& data_dir();
+
+// Format an output path for debugging purposes.
+// Writes out the output path prefix to the console for the first time the function is called,
+// so the user knows where to search for the debugging output.
+std::string debug_out_path(const char *name, ...);
 
 // A special type for strings encoded in the local Windows 8-bit code page.
 // This type is only needed for Perl bindings to relay to Perl that the string is raw, not UTF-8 encoded.
@@ -47,51 +87,69 @@ extern local_encoded_string encode_path(const char *src);
 extern std::string decode_path(const char *src);
 extern std::string normalize_utf8_nfc(const char *src);
 
+// Returns next utf8 sequence length. =number of bytes in string, that creates together one utf-8 character. 
+// Starting at pos. ASCII characters returns 1. Works also if pos is in the middle of the sequence.
+extern size_t get_utf8_sequence_length(const std::string& text, size_t pos = 0);
+extern size_t get_utf8_sequence_length(const char *seq, size_t size);
+
+// If the file has a relative path, it tries to find it in the exe directory, the configuration directory and the user directory.
+// If it can't find it, it returns an empty path
+extern boost::filesystem::path find_full_path(const boost::filesystem::path filename, const boost::filesystem::path return_fail = "");
+
+// If the filename is an absolute path, it remove the exe directory path, the configuration directory path or the user directory path to create a relative path.
+extern boost::filesystem::path shorten_path(const boost::filesystem::path filename);
+
 // Safely rename a file even if the target exists.
 // On Windows, the file explorer (or anti-virus or whatever else) often locks the file
 // for a short while, so the file may not be movable. Retry while we see recoverable errors.
-extern int rename_file(const std::string &from, const std::string &to);
+extern std::error_code rename_file(const std::string &from, const std::string &to);
 
-// Copy a file, adjust the access attributes, so that the target is writable.
-extern int copy_file(const std::string &from, const std::string &to);
-
-// File path / name / extension splitting utilities, working with UTF-8,
-// to be published to Perl.
-namespace PerlUtils {
-    // Get a file name including the extension.
-    extern std::string path_to_filename(const char *src);
-    // Get a file name without the extension.
-    extern std::string path_to_stem(const char *src);
-    // Get just the extension.
-    extern std::string path_to_extension(const char *src);
-    // Get a directory without the trailing slash.
-    extern std::string path_to_parent_path(const char *src);
+enum CopyFileResult {
+	SUCCESS = 0,
+	FAIL_COPY_FILE,
+	FAIL_FILES_DIFFERENT,
+	FAIL_RENAMING,
+	FAIL_CHECK_ORIGIN_NOT_OPENED,
+	FAIL_CHECK_TARGET_NOT_OPENED
 };
+// Copy a file, adjust the access attributes, so that the target is writable.
+CopyFileResult copy_file_inner(const std::string& from, const std::string& to, std::string& error_message);
+CopyFileResult copy_file_inner(const boost::filesystem::path& from, const boost::filesystem::path& to, std::string& error_message);
+// Copy file to a temp file first, then rename it to the final file name.
+// If with_check is true, then the content of the copied file is compared to the content
+// of the source file before renaming.
+// Additional error info is passed in error message.
+extern CopyFileResult copy_file(const std::string &from, const std::string &to, std::string& error_message, const bool with_check = false);
+
+// Compares two files if identical.
+extern CopyFileResult check_copy(const std::string& origin, const std::string& copy);
+
+// Ignore system and hidden files, which may be created by the DropBox synchronisation process.
+// https://github.com/prusa3d/PrusaSlicer/issues/1298
+extern bool is_plain_file(const boost::filesystem::directory_entry &path);
+extern bool is_ini_file(const boost::filesystem::directory_entry &path);
+extern bool is_idx_file(const boost::filesystem::directory_entry &path);
+extern bool is_gcode_file(const std::string &path);
+extern bool is_img_file(const std::string& path);
+extern bool is_gallery_file(const boost::filesystem::directory_entry& path, char const* type);
+extern bool is_gallery_file(const std::string& path, char const* type);
+extern bool is_shapes_dir(const std::string& dir);
 
 std::string string_printf(const char *format, ...);
 
-// Timestamp formatted for header_slic3r_generated().
-extern std::string timestamp_str();
+
+void set_header_generate_with_date(bool with_date);
+
 // Standard "generated by Slic3r version xxx timestamp xxx" header string, 
 // to be placed at the top of Slic3r generated files.
-inline std::string header_slic3r_generated() { return std::string("generated by " SLIC3R_FORK_NAME " " SLIC3R_VERSION " " ) + timestamp_str(); }
+std::string header_slic3r_generated();
+
+// Standard "generated by PrusaGCodeViewer version xxx timestamp xxx" header string, 
+// to be placed at the top of Slic3r generated files.
+std::string header_gcodeviewer_generated();
 
 // getpid platform wrapper
 extern unsigned get_current_pid();
-
-template <typename Real>
-Real round_nearest(Real value, unsigned int decimals)
-{
-    Real res = (Real)0;
-    if (decimals == 0)
-        res = ::round(value);
-    else
-    {
-        Real power = ::pow((Real)10, (int)decimals);
-        res = ::round(value * power + (Real)0.5) / power;
-    }
-    return res;
-}
 
 // Compute the next highest power of 2 of 32-bit v
 // http://graphics.stanford.edu/~seander/bithacks.html
@@ -149,16 +207,112 @@ template<class T> size_t next_highest_power_of_2(T v,
     return next_highest_power_of_2(uint32_t(v));
 }
 
+template<class VectorType> void reserve_power_of_2(VectorType &vector, size_t n)
+{
+    vector.reserve(next_highest_power_of_2(n));
+}
 
-extern std::string xml_escape(std::string text);
+template<class VectorType> void reserve_more(VectorType &vector, size_t n)
+{
+    vector.reserve(vector.size() + n);
+}
 
+template<class VectorType> void reserve_more_power_of_2(VectorType &vector, size_t n)
+{
+    vector.reserve(next_highest_power_of_2(vector.size() + n));
+}
+
+template<typename INDEX_TYPE>
+inline INDEX_TYPE prev_idx_modulo(INDEX_TYPE idx, const INDEX_TYPE count)
+{
+	if (idx == 0)
+		idx = count;
+	return -- idx;
+}
+
+template<typename INDEX_TYPE>
+inline INDEX_TYPE next_idx_modulo(INDEX_TYPE idx, const INDEX_TYPE count)
+{
+	if (++ idx == count)
+		idx = 0;
+	return idx;
+}
+
+
+// Return dividend divided by divisor rounded to the nearest integer
+template<typename INDEX_TYPE>
+inline INDEX_TYPE round_up_divide(const INDEX_TYPE dividend, const INDEX_TYPE divisor)
+{
+    return (dividend + divisor - 1) / divisor;
+}
+
+template<typename CONTAINER_TYPE>
+inline typename CONTAINER_TYPE::size_type prev_idx_modulo(typename CONTAINER_TYPE::size_type idx, const CONTAINER_TYPE &container) 
+{ 
+	return prev_idx_modulo(idx, container.size());
+}
+
+template<typename CONTAINER_TYPE>
+inline typename CONTAINER_TYPE::size_type next_idx_modulo(typename CONTAINER_TYPE::size_type idx, const CONTAINER_TYPE &container)
+{ 
+	return next_idx_modulo(idx, container.size());
+}
+
+template<typename CONTAINER_TYPE>
+inline const typename CONTAINER_TYPE::value_type& prev_value_modulo(typename CONTAINER_TYPE::size_type idx, const CONTAINER_TYPE &container)
+{ 
+	return container[prev_idx_modulo(idx, container.size())];
+}
+
+template<typename CONTAINER_TYPE>
+inline typename CONTAINER_TYPE::value_type& prev_value_modulo(typename CONTAINER_TYPE::size_type idx, CONTAINER_TYPE &container) 
+{ 
+	return container[prev_idx_modulo(idx, container.size())];
+}
+
+template<typename CONTAINER_TYPE>
+inline const typename CONTAINER_TYPE::value_type& next_value_modulo(typename CONTAINER_TYPE::size_type idx, const CONTAINER_TYPE &container)
+{ 
+	return container[next_idx_modulo(idx, container.size())];
+}
+
+template<typename CONTAINER_TYPE>
+inline typename CONTAINER_TYPE::value_type& next_value_modulo(typename CONTAINER_TYPE::size_type idx, CONTAINER_TYPE &container)
+{ 
+	return container[next_idx_modulo(idx, container.size())];
+}
+
+extern std::string xml_escape(std::string text, bool is_marked = false);
+extern std::string xml_escape_double_quotes_attribute_value(std::string text);
+
+
+#if defined __GNUC__ && __GNUC__ < 5 && !defined __clang__
+// Older GCCs don't have std::is_trivially_copyable
+// cf. https://gcc.gnu.org/onlinedocs/gcc-4.9.4/libstdc++/manual/manual/status.html#status.iso.2011
+// #warning "GCC version < 5, faking std::is_trivially_copyable"
+template<typename T> struct IsTriviallyCopyable { static constexpr bool value = true; };
+#else
+template<typename T> struct IsTriviallyCopyable : public std::is_trivially_copyable<T> {};
+#endif
+
+// A very lightweight ROII wrapper around C FILE.
+// The old C file API is much faster than C++ streams, thus they are recommended for processing large / huge files.
+struct FilePtr {
+    FilePtr(FILE *f) : f(f) {}
+    ~FilePtr() { this->close(); }
+    void close() { 
+        if (this->f) {
+            ::fclose(this->f);
+            this->f = nullptr;
+        }
+    }
+    FILE* f = nullptr;
+};
 
 class ScopeGuard
 {
 public:
     typedef std::function<void()> Closure;
-private:
-    bool committed;
     Closure closure;
 
 public:
@@ -182,7 +336,69 @@ public:
     void reset() { closure = Closure(); }
 };
 
+// Shorten the dhms time by removing the seconds, rounding the dhm to full minutes
+// and removing spaces.
+std::string short_time(const std::string& time, bool force_localization = false);
+// localized short_time used on UI
+inline std::string short_time_ui(const std::string& time) { return short_time(time, true); }
+
+// Returns the given time is seconds in format DDd HHh MMm SSs
+inline std::string get_time_dhms(float time_in_secs)
+{
+    int days = (int)(time_in_secs / 86400.0f);
+    time_in_secs -= (float)days * 86400.0f;
+    int hours = (int)(time_in_secs / 3600.0f);
+    time_in_secs -= (float)hours * 3600.0f;
+    int minutes = (int)(time_in_secs / 60.0f);
+    time_in_secs -= (float)minutes * 60.0f;
+
+    char buffer[64];
+    if (days > 0)
+        ::sprintf(buffer, "%dd %dh %dm %ds", days, hours, minutes, (int)time_in_secs);
+    else if (hours > 0)
+        ::sprintf(buffer, "%dh %dm %ds", hours, minutes, (int)time_in_secs);
+    else if (minutes > 0)
+        ::sprintf(buffer, "%dm %ds", minutes, (int)time_in_secs);
+    else
+        ::sprintf(buffer, "%ds", (int)std::round(time_in_secs));
+
+    return buffer;
+}
+
+// Returns the given time is seconds in format DDd HHh MMm
+inline std::string get_time_dhm(float time_in_secs)
+{
+    char buffer[64];
+
+    int minutes = (int)std::round(time_in_secs / 60.);
+    if (minutes <= 0) {
+        ::sprintf(buffer, "%ds", (int)time_in_secs);
+    } else {
+        int days = minutes / 1440;
+        minutes -= days * 1440;
+        int hours = minutes / 60;
+        minutes -= hours * 60;
+        if (days > 0)
+            ::sprintf(buffer, "%dd %dh %dm", days, hours, minutes);
+        else if (hours > 0)
+            ::sprintf(buffer, "%dh %dm", hours, minutes);
+        else
+            ::sprintf(buffer, "%dm", minutes);
+    }
+
+    return buffer;
+}
 
 } // namespace Slic3r
+
+#if WIN32
+    #define SLIC3R_STDVEC_MEMSIZE(NAME, TYPE) NAME.capacity() * ((sizeof(TYPE) + __alignof(TYPE) - 1) / __alignof(TYPE)) * __alignof(TYPE)
+    //FIXME this is an inprecise hack. Add the hash table size and possibly some estimate of the linked list at each of the used bin.
+    #define SLIC3R_STDUNORDEREDSET_MEMSIZE(NAME, TYPE) NAME.size() * ((sizeof(TYPE) + __alignof(TYPE) - 1) / __alignof(TYPE)) * __alignof(TYPE)
+#else
+    #define SLIC3R_STDVEC_MEMSIZE(NAME, TYPE) NAME.capacity() * ((sizeof(TYPE) + alignof(TYPE) - 1) / alignof(TYPE)) * alignof(TYPE)
+    //FIXME this is an inprecise hack. Add the hash table size and possibly some estimate of the linked list at each of the used bin.
+    #define SLIC3R_STDUNORDEREDSET_MEMSIZE(NAME, TYPE) NAME.size() * ((sizeof(TYPE) + alignof(TYPE) - 1) / alignof(TYPE)) * alignof(TYPE)
+#endif
 
 #endif // slic3r_Utils_hpp_

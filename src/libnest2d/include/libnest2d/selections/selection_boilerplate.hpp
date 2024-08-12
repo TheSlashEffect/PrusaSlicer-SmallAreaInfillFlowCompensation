@@ -2,39 +2,61 @@
 #define SELECTION_BOILERPLATE_HPP
 
 #include <atomic>
-#include <libnest2d/libnest2d.hpp>
+#include <libnest2d/nester.hpp>
 
 namespace libnest2d { namespace selections {
 
 template<class RawShape>
 class SelectionBoilerplate {
 public:
+    using ShapeType = RawShape;
     using Item = _Item<RawShape>;
-    using ItemRef = std::reference_wrapper<Item>;
-    using ItemGroup = std::vector<ItemRef>;
-    using PackGroup = std::vector<ItemGroup>;
+    using ItemGroup = _ItemGroup<RawShape>;
+    using PackGroup = _PackGroup<RawShape>;
 
-    size_t binCount() const { return packed_bins_.size(); }
-
-    ItemGroup itemsForBin(size_t binIndex) {
-        assert(binIndex < packed_bins_.size());
-        return packed_bins_[binIndex];
+    inline const PackGroup& getResult() const {
+        return packed_bins_;
     }
 
-    inline const ItemGroup itemsForBin(size_t binIndex) const {
-        assert(binIndex < packed_bins_.size());
-        return packed_bins_[binIndex];
-    }
+    inline int lastPackedBinId() const { return last_packed_bin_id_; }
 
     inline void progressIndicator(ProgressFunction fn) { progress_ = fn; }
 
     inline void stopCondition(StopCondition cond) { stopcond_ = cond; }
 
+    inline void clear() { packed_bins_.clear(); }
+
 protected:
+
+    template<class Placer, class Container, class Bin, class PCfg>
+    void remove_unpackable_items(Container &c, const Bin &bin, const PCfg& pcfg)
+    {
+        // Safety test: try to pack each item into an empty bin. If it fails
+        // then it should be removed from the list
+        auto it = c.begin();
+        while (it != c.end() && !stopcond_()) {
+
+            // WARNING: The copy of itm needs to be created before Placer.
+            // Placer is working with references and its destructor still
+            // manipulates the item this is why the order of stack creation
+            // matters here.
+            const Item& itm = *it;
+            Item cpy{itm};
+
+            Placer p{bin};
+            p.configure(pcfg);
+            if (itm.area() <= 0 || !p.pack(cpy)) {
+                static_cast<Item&>(*it).binId(BIN_ID_UNSET);
+                it = c.erase(it);
+            }
+            else it++;
+        }
+    }
 
     PackGroup packed_bins_;
     ProgressFunction progress_ = [](unsigned){};
     StopCondition stopcond_ = [](){ return false; };
+    int last_packed_bin_id_ = -1;
 };
 
 }

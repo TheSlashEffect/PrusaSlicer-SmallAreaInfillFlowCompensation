@@ -1,3 +1,11 @@
+///|/ Copyright (c) Prusa Research 2017 - 2021 Vojtěch Bubník @bubnikv, Lukáš Matěna @lukasmatena, Enrico Turri @enricoturri1966
+///|/
+///|/ ported from lib/Slic3r/Format/AMF.pm:
+///|/ Copyright (c) Prusa Research 2017 Vojtěch Bubník @bubnikv
+///|/ Copyright (c) Slic3r 2012 - 2015 Alessandro Ranellucci @alranel
+///|/
+///|/ PrusaSlicer is released under the terms of the AGPLv3 or higher
+///|/
 #ifndef slic3r_Format_AMF_hpp_
 #define slic3r_Format_AMF_hpp_
 
@@ -7,12 +15,21 @@ class Model;
 class DynamicPrintConfig;
 
 // Load the content of an amf file into the given model and configuration.
-extern bool load_amf(const char *path, DynamicPrintConfig *config, Model *model);
+extern bool load_amf(const char* path, DynamicPrintConfig* config, ConfigSubstitutionContext* config_substitutions, Model* model, bool check_version);
+
+struct OptionStoreAmf {
+    bool fullpath_sources = true;
+    bool export_config = true;
+    bool export_modifiers = true;
+    OptionStoreAmf& set_fullpath_sources(bool use_fullpath_sources) { fullpath_sources = use_fullpath_sources; return *this; }
+    OptionStoreAmf& set_export_config(bool use_export_config) { export_config = use_export_config; return *this; }
+    OptionStoreAmf& set_export_modifiers(bool use_export_modifiers) { export_modifiers = use_export_modifiers; return *this; }
+};
 
 // Save the given model and the config data into an amf file.
 // The model could be modified during the export process if meshes are not repaired or have no shared vertices
-extern bool store_amf(const char *path, Model *model, const DynamicPrintConfig *config);
+extern bool store_amf(std::string &path, Model *model, const DynamicPrintConfig *config, OptionStoreAmf options);
 
-}; // namespace Slic3r
+} // namespace Slic3r
 
 #endif /* slic3r_Format_AMF_hpp_ */

@@ -22,6 +22,10 @@
 static const size_t MAX_SIZE     = sizeof(char) * 255;
 static const int MAX_SAFE_INT = (unsigned int) -1 >> 1;
 
+#ifdef _WIN32
+  #define strdup _strdup
+#endif
+
 /**
  * Define comparison operators, storing the
  * ASCII code per each symbol in hexadecimal notation.
@@ -50,8 +54,8 @@ strcut (char *str, int begin, int len) {
 
   if((int)l < 0 || (int)l > MAX_SAFE_INT) return -1;
 
-  if (len < 0) len = l - begin + 1;
-  if (begin + len > (int)l) len = l - begin;
+  if (len < 0) len = (int)l - begin + 1;
+  if (begin + len > (int)l) len = (int)l - begin;
   memmove(str + begin, str + begin + len, l - len + 1 - begin);
 
   return len;
@@ -104,7 +108,7 @@ parse_int (const char *s) {
 static char *
 parse_slice (char *buf, char sep) {
   char *pr, *part;
-  int plen;
+  size_t plen;
 
   /* Find separator in buf */
   pr = strchr(buf, sep);
@@ -159,6 +163,40 @@ semver_parse (const char *str, semver_t *ver) {
 }
 
 /**
+ * count he numbezr of int
+ */
+int
+semver_count_version(const char* str) {
+    size_t len;
+    int index, value;
+    char* slice, * next, * endptr;
+    slice = (char*)str;
+    index = 0;
+
+    while (slice != NULL && index++ < 4) {
+        next = strchr(slice, DELIMITER[0]);
+        if (next == NULL)
+            len = strlen(slice);
+        else
+            len = next - slice;
+        if (len > SLICE_SIZE) return -1;
+
+        /* Cast to integer and store */
+        value = strtol(slice, &endptr, 10);
+        if (endptr != next && *endptr != '\0') return -1;
+
+        /* Continue with the next slice */
+        if (next == NULL)
+            slice = NULL;
+        else
+            slice = next + 1;
+    }
+
+    // Major and minor versions are mandatory, patch version is not mandatory.
+    return index;
+}
+
+/**
  * Parses a given string as semver expression.
  *
  * Returns:
@@ -174,44 +212,45 @@ semver_parse_version (const char *str, semver_t *ver) {
   char *slice, *next, *endptr;
   slice = (char *) str;
   index = 0;
-
-  // non mandatory
-  ver->patch = 0;
-
-  while (slice != NULL && index++ < 4) {
-    next = strchr(slice, DELIMITER[0]);
-    if (next == NULL)
-      len = strlen(slice);
-    else
-      len = next - slice;
-    if (len > SLICE_SIZE) return -1;
-
-    /* Cast to integer and store */
-    value = strtol(slice, &endptr, 10);
-    if (endptr != next && *endptr != '\0') return -1;
-
-    switch (index) {
-      case 1: ver->major = value; break;
-      case 2: ver->minor = value; break;
-      case 3: ver->patch = value; break;
-    }
-
-    /* Continue with the next slice */
-    if (next == NULL)
-      slice = NULL;
-    else
-      slice = next + 1;
+  if (ver->counters) {
+      free(ver->counters);
+      ver->counters = NULL;
   }
+  ver->counter_size = semver_count_version(str);
+  if (ver->counter_size != 0) {
+      ver->counters = malloc(ver->counter_size * sizeof(int));
 
+      while (slice != NULL && index++ < 4) {
+          next = strchr(slice, DELIMITER[0]);
+          if (next == NULL)
+              len = strlen(slice);
+          else
+              len = next - slice;
+          if (len > SLICE_SIZE) return -1;
+
+          /* Cast to integer and store */
+          value = strtol(slice, &endptr, 10);
+          if (endptr != next && *endptr != '\0') return -1;
+
+          ver->counters[index - 1] = value;
+
+          /* Continue with the next slice */
+          if (next == NULL)
+              slice = NULL;
+          else
+              slice = next + 1;
+      }
+  }
   // Major and minor versions are mandatory, patch version is not mandatory.
-  return (index == 2 || index == 3) ? 0 : -1;
+  return (index >= 2) ? 0 : -1;
 }
 
 static int
 compare_prerelease (char *x, char *y) {
   char *lastx, *lasty, *xptr, *yptr, *endptr;
-  int xlen, ylen, xisnum, yisnum, xnum, ynum;
-  int xn, yn, min, res;
+  size_t xlen, ylen, xn, yn, min;
+  int xisnum, yisnum, xnum, ynum;
+  int res;
   if (x == NULL && y == NULL) return 0;
   if (y == NULL && x) return -1;
   if (x == NULL && y) return 1;
@@ -275,12 +314,11 @@ semver_compare_prerelease (semver_t x, semver_t y) {
 
 int
 semver_compare_version (semver_t x, semver_t y) {
-  int res;
+  int res = binary_comparison(x.counter_size, y.counter_size);
 
-  if ((res = binary_comparison(x.major, y.major)) == 0) {
-    if ((res = binary_comparison(x.minor, y.minor)) == 0) {
-      return binary_comparison(x.patch, y.patch);
-    }
+  for (int i = 0; i < x.counter_size && i < y.counter_size; i++) {
+      if ((res = binary_comparison(x.counters[i], y.counters[i])) != 0)
+          return res;
   }
 
   return res;
@@ -374,9 +412,9 @@ semver_lte (semver_t x, semver_t y) {
 
 int
 semver_satisfies_caret (semver_t x, semver_t y) {
-  if (x.major == y.major) {
-    if (x.major == 0) {
-      return x.minor >= y.minor;
+  if (x.counter_size > 0 && y.counter_size > 0 && x.counters[0] == y.counters[0]) {
+    if (x.counters[0] == 0) {
+      return x.counter_size > 1 && y.counter_size > 1 && x.counters[1] >= y.counters[1];
     }
     return 1;
   }
@@ -397,8 +435,8 @@ semver_satisfies_caret (semver_t x, semver_t y) {
 
 int
 semver_satisfies_patch (semver_t x, semver_t y) {
-  return x.major == y.major
-      && x.minor == y.minor;
+  return x.counter_size > 1 && y.counter_size > 1 && x.counters[0] == y.counters[0]
+      && x.counters[1] == y.counters[1];
 }
 
 /**
@@ -475,6 +513,11 @@ semver_free (semver_t *x) {
     free(x->prerelease);
     x->prerelease = NULL;
   }
+  if (x->counters) {
+      x->counter_size = 0;
+      free(x->counters);
+      x->counters = NULL;
+  }
 }
 
 /**
@@ -502,9 +545,9 @@ concat_char (char * str, char * x, char * sep) {
 
 void
 semver_render (semver_t *x, char *dest) {
-  if (x->major) concat_num(dest, x->major, NULL);
-  if (x->minor) concat_num(dest, x->minor, DELIMITER);
-  if (x->patch) concat_num(dest, x->patch, DELIMITER);
+  for (int i = 0; i < x->counter_size; ++i) {
+      concat_num(dest, x->counters[i], i==0 ? NULL : DELIMITER);
+  }
   if (x->prerelease) concat_char(dest, x->prerelease, PR_DELIMITER);
   if (x->metadata) concat_char(dest, x->metadata, MT_DELIMITER);
 }
@@ -514,18 +557,21 @@ semver_render (semver_t *x, char *dest) {
  */
 
 void
-semver_bump (semver_t *x) {
-  x->major++;
+semver_bump_major (semver_t *x) {
+  if(x->counter_size > 0)
+    x->counters[0]++;
 }
 
 void
 semver_bump_minor (semver_t *x) {
-  x->minor++;
+    if (x->counter_size > 1)
+        x->counters[1]++;
 }
 
 void
-semver_bump_patch (semver_t *x) {
-  x->patch++;
+semver_bump (semver_t *x, int idx) {
+    if (x->counter_size > idx)
+        x->counters[idx]++;
 }
 
 /**
@@ -572,7 +618,7 @@ semver_clean (char *s) {
 
   for (i = 0; i < len; i++) {
     if (contains(s[i], VALID_CHARS, mlen) == 0) {
-      res = strcut(s, i, 1);
+      res = strcut(s, (int)i, 1);
       if(res == -1) return -1;
       --len; --i;
     }
@@ -607,9 +653,9 @@ semver_numeric (semver_t *x) {
   char buf[SLICE_SIZE * 3];
   memset(&buf, 0, SLICE_SIZE * 3);
 
-  if (x->major) concat_num(buf, x->major, NULL);
-  if (x->minor) concat_num(buf, x->minor, NULL);
-  if (x->patch) concat_num(buf, x->patch, NULL);
+  for (int i = 0; i < x->counter_size; ++i) {
+      concat_num(buf, x->counters[i], NULL);
+  }
 
   num = parse_int(buf);
   if(num == -1) return -1;
@@ -620,11 +666,17 @@ semver_numeric (semver_t *x) {
   return num;
 }
 
-char *semver_strdup(const char *src) {
-  if (src == NULL) return NULL;
-  size_t len = strlen(src) + 1;
-  char *res = malloc(len);
-  return res != NULL ? (char *) memcpy(res, src, len) : NULL;
+char* semver_strdup(const char* src) {
+    if (src == NULL) return NULL;
+    size_t len = strlen(src) + 1;
+    char* res = malloc(len);
+    return res != NULL ? (char*)memcpy(res, src, len) : NULL;
+}
+
+int* semver_intdup(const int* src, int len) {
+    if (src == NULL) return NULL;
+    int* res = malloc(len * sizeof(int));
+    return res != NULL ? (int*)memcpy(res, src, len * sizeof(int)) : NULL;
 }
 
 semver_t
@@ -634,7 +686,10 @@ semver_copy(const semver_t *ver) {
     res.metadata = strdup(ver->metadata);
   }
   if (ver->prerelease != NULL) {
-    res.prerelease = strdup(ver->prerelease);
+      res.prerelease = strdup(ver->prerelease);
+  }
+  if (ver->counters) {
+      res.counters = semver_intdup(ver->counters, ver->counter_size);
   }
   return res;
 }
